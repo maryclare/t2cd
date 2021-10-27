@@ -1,6 +1,7 @@
 
 # multivariate implementation for T2CD-step
 # grid search for d and tau
+#' @export
 t2cd_step.mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                         seqby = 1, resd.seqby = 5,
                         use_arf = TRUE, use_scale = TRUE,
@@ -122,6 +123,7 @@ t2cd_step.mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 
 # grid search for tau given FI parameters
 # return the likelihood for each combination
+#' @export
 search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                            dflag = 'original', seqby = 1, resd.seqby = 5,
                            use_arf = FALSE, use_scale = TRUE,
@@ -225,6 +227,7 @@ search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 }
 
 # plot sequences and fitted lines
+#' @export
 plot.t2cd_step.mv = function(results, tau.range = c(10, 50), deg = 3,
                           use_arf = TRUE, use_scale = TRUE, return_plot = TRUE){
   res = results$res
@@ -309,6 +312,7 @@ plot.t2cd_step.mv = function(results, tau.range = c(10, 50), deg = 3,
 }
 
 # parametric bootstrap using outputs from t2cd_step and plot.t2cd_step
+#' @export
 bootstrap_sample.mv = function(results, plot_results, seed = 0){
 
   set.seed(seed)
