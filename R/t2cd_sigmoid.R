@@ -9,9 +9,11 @@ negloglik_pen_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag,
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
+  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
   wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
              wt_cp,
-             matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
+             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
+                        N-tau.idx[length(tau.idx)]), p, byrow = F))
 
   if (dflag == 'original'){
     x.2m = x.2-m
@@ -37,9 +39,11 @@ loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag, ll.1.mat
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
+  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
   wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
              wt_cp,
-             matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
+             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
+                        N-tau.idx[length(tau.idx)]), p, byrow = F))
 
   if (dflag == 'original'){
     x.2m = x.2-m
@@ -183,6 +187,7 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
+  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
   wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
              wt_cp,
              matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
@@ -246,6 +251,7 @@ plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
+  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
   wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
              wt_cp,
              matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),

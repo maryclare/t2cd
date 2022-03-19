@@ -16,7 +16,7 @@ loglik_res_step = function(param, x.2){
   dfrac = param[2]
 
   diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), dfrac))
-
+  # MCG Change: Updated the variance here, before it was sd(diff_p) which is not quite right
   logL = sum(dnorm(diff_p, log = TRUE, sd = sqrt(mean(diff_p^2))))
 
   return(logL)

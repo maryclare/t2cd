@@ -170,6 +170,7 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
       }
       reg2[k, (res_k$idx+1):N] = res[k, (res_k$idx+1):N]
     }
+    print(res_k$idx)
 
     # preprocessing
     dflag = 'original'
@@ -185,14 +186,14 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 
     # optimizing
     optim_params = optim(par = d_current,
-                         fn = negloglik, method = "Brent", lower = -10,
-                         upper = 10)
+                         fn = negloglik_res_step_mv, method = "Brent", lower = -10,
+                         upper = 10, x.2 = x.2)
     d_current = optim_params$par
     m_current = rep(NA, nrow(res))
     for (k in 1:length(m_current)) {
       m_current[k] <-  get.m(x.2 = na.omit(x.2[k, ]), dfrac = d_current)
     }
-    neglogL_current = negloglik(optim_params$par)
+    neglogL_current = negloglik_res_step_mv(optim_params$par, x.2 = x.2)
 
     # update iter_flag
     if (iter_k==maxiter | abs(neglogL_prev-neglogL_current)<tol){
