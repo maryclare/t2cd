@@ -1,3 +1,63 @@
+# helper functions for loglikelihood
+#' @export
+negloglik_res_step = function(param, x.2){
+  m = param[1]
+  dfrac = param[2]
+
+  diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), dfrac))
+
+  neglogL = sum(diff_p^2)
+
+  return(neglogL)
+}
+#' @export
+loglik_res_step = function(param, x.2){
+  m = param[1]
+  dfrac = param[2]
+
+  diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), dfrac))
+
+  logL = sum(dnorm(diff_p, log = TRUE, sd = sqrt(mean(diff_p^2))))
+
+  return(logL)
+}
+
+#' @export
+fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, tau_j, N,
+                        use_arf, dflag){
+
+fit1 = refitWLS(t.1, x.1, deg = deg, seqby = seqby, resd.seqby = resd.seqby)
+resd1.1 = x.1 - fit1$fit.vals
+var.resd1.1 = fit1$var.resd
+ll.1 = sum(dnorm(resd1.1, log = TRUE, sd = sqrt(var.resd1.1)))
+
+# optimizing
+if (use_arf){
+  if (dflag == 'original'){
+    arf = arfima::arfima(x.2)
+    fit_d = arf$modes[[1]]$dfrac
+  }else{
+    arf = arfima::arfima(x.2)
+    fit_d = arf$modes[[1]]$dfrac + 1
+  }
+  fit_m = arf$models[[1]]$muHat
+  n.2 = length(x.2)
+  ll.2 = arf$modes[[1]]$loglik - (n.2/2)*log(2*pi) - n.2/2
+}else{
+  optim.2 = optim(par = c(mean(x.2), 0),
+                  fn = negloglik_res_step, method = "BFGS",
+                  x.2 = x.2)
+  if (dflag == 'original'){
+    fit_d = optim.2$par[2]
+  }else{
+    fit_d = optim.2$par[2] + 1
+  }
+  fit_m = optim.2$par[1]
+  ll.2 = loglik_res_step(optim.2$par, x.2 = x.2)
+}
+return(list(fit_M=ll.1 + ll.2,fit_d=fit_d,fit_m=fit_m))
+}
+
 # fit first regime with model that accounts to heteroscedastic noise
 # fit second regime with ARFIMA as in cpsearch2.R
 # uses loglikelihood of original series
@@ -17,8 +77,8 @@ t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   # use_arf: if true, use arfima estimates from arfima package
   # use_scale: if true, scale time series
   res1 = search_dtau_step(dat, t.max, tau.range, deg, dflag = 'original',
-                           seqby = seqby, resd.seqby = resd.seqby,
-                           use_arf = use_arf, use_scale = use_scale)
+                          seqby = seqby, resd.seqby = resd.seqby,
+                          use_arf = use_arf, use_scale = use_scale)
   return(res1)
 }
 
@@ -67,86 +127,35 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   }
 
   # iterate through each tau, return log-likelihood
-  for (j in 1:length(tau.idx)){
+  foreach.tau <- lapply(1:length(tau.idx), function(j) {
+    cat("j=", j, "\n")
     tau_j = tau.idx[j]
 
     # optimize for polynomial component
     x.1 = res_mean[1:tau_j]
     t.1 = tim[1:tau_j]
     n.1 = length(x.1)
-
-    fit = function(){
-      fit1 = refitWLS(t.1, x.1, deg = deg, seqby = seqby, resd.seqby = resd.seqby)
-      resd1.1 = x.1 - fit1$fit.vals
-      var.resd1.1 = fit1$var.resd
-      ll.1 = sum(dnorm(resd1.1, log = TRUE, sd = sqrt(var.resd1.1)))
-
-      # optimize for ARFIMA
-      if (dflag == 'original'){
-        x.2 = res_mean[(tau_j+1):N]
-      }else{
-        x.2 = diff(res_mean[(tau_j):N], 1)
-      }
-      # helper functions for loglikelihood
-      negloglik = function(param){
-        m = param[1]
-        dfrac = param[2]
-
-        diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), dfrac))
-
-        neglogL = sum(diff_p^2)
-
-        return(neglogL)
-      }
-      loglik = function(param){
-        m = param[1]
-        dfrac = param[2]
-
-        diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), dfrac))
-
-        logL = sum(dnorm(diff_p, log = TRUE, sd = sd(diff_p)))
-
-        return(logL)
-      }
-
-      # optimizing
-      if (use_arf){
-        if (dflag == 'original'){
-          arf = arfima::arfima(x.2)
-          fit_d = arf$modes[[1]]$dfrac
-        }else{
-          arf = arfima::arfima(x.2)
-          fit_d = arf$modes[[1]]$dfrac + 1
-        }
-        fit_m = arf$models[[1]]$muHat
-        n.2 = length(x.2)
-        ll.2 = arf$modes[[1]]$loglik - (n.2/2)*log(2*pi) - n.2/2
-      }else{
-        optim.2 = optim(par = c(mean(x.2), 0),
-                        fn = negloglik, method = "BFGS")
-        if (dflag == 'original'){
-          fit_d = optim.2$par[2]
-        }else{
-          fit_d = optim.2$par[2] + 1
-        }
-        fit_m = optim.2$par[1]
-        ll.2 = loglik(optim.2$par)
-      }
-      return(list(fit_M=ll.1 + ll.2,fit_d=fit_d,fit_m=fit_m))
-    }
-
-    fit_res = tryCatch(fit(),
-                    error = function(e) {return(NA)})
-    if (any(is.na(fit_res))){
-      M = c(M, -Inf)
-      d = c(d, NA)
-      m = c(m, NA)
+    # optimize for ARFIMA
+    if (dflag == 'original'){
+      x.2 = res_mean[(tau_j+1):N]
     }else{
-      M = c(M, fit_res$fit_M)
-      d = c(d, fit_res$fit_d)
-      m = c(m, fit_res$fit_m)
+      x.2 = diff(res_mean[(tau_j):N], 1)
     }
-  }
+
+    fit_res = tryCatch(fit_res_step(t.1 = t.1,  x.1 = x.1, x.2 = x.2, deg = deg,
+                                    seqby = seqby, resd.seqby = resd.seqby, tau_j = tau_j,
+                                    N = N, use_arf = use_arf, dflag = dflag),
+                       error = function(e) {return(NA)})
+    if (any(is.na(fit_res))){
+      return(list("M" = -Inf, "d" = NA, "m" = NA))
+    }else{
+      return(list("M" = fit_res$fit_M, "d" = fit_res$fit_d, "m" = fit_res$fit_m))
+    }
+  })
+
+  M <- unlist(lapply(foreach.tau, function(x) {x$M}))
+  d <- unlist(lapply(foreach.tau, function(x) {x$d}))
+  m <- unlist(lapply(foreach.tau, function(x) {x$m}))
 
   # tau and d at maximum log-likelihood
   M_df = data.frame(tau = tim[tau.idx], M = M, d = d, m = m)
@@ -160,11 +169,10 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
               idx = tau.idx[max.idx], logL = M[max.idx],
               dflag = dflag))
 }
-
 # plot sequences and fitted lines
 #' @export
-plot.t2cd_step = function(results, tau.range = c(10, 50), deg = 3,
-                           use_arf = TRUE, use_scale = TRUE, return_plot = TRUE){
+plot_t2cd_step = function(results, tau.range = c(10, 50), deg = 3,
+                          use_arf = TRUE, use_scale = TRUE, return_plot = TRUE){
   res = results$res
   tim = results$tim
   tau.idx = results$tau.idx
@@ -251,14 +259,14 @@ plot.t2cd_step = function(results, tau.range = c(10, 50), deg = 3,
     abline(v = tau.range, lty = 1, col = "red")
   }
 
-  return(list(fit.vals1 = fit.vals[1:opt_idx], fit.vals2 = fit.vals[(opt_idx+1):N],
-              opt_idx = opt_idx, N = N,
-              var.resd1 = var.resd1))
+  return(list(fit.vals1 = mu[1:opt_idx], fit.vals2 = mu[(opt_idx+1):N],
+              opt_idx = opt_idx, N = N, scaling = attributes(res_mean)$'scaled:scale',
+              var.resd1 = fit1$var.resd))
 }
 
 # parametric bootstrap using outputs from t2cd_step and plot.t2cd_step
 #' @export
-bootstrap_sample = function(results, plot_results, seed = 0){
+bootstrap_sample_step = function(results, plot_results, seed = 0){
 
   set.seed(seed)
   res = results$res
@@ -267,18 +275,36 @@ bootstrap_sample = function(results, plot_results, seed = 0){
   opt_idx = results$idx
 
   # regime 1
-  fit.vals1 = plot_results$fit.vals1
-  var.resd1 = plot_results$var.resd1
+  fit.vals1 = plot_results$fit.vals1*plot_results$scaling
+  var.resd1 = plot_results$var.resd1*plot_results$scaling^2
   noise1 = rnorm(opt_idx, 0, sqrt(var.resd1))
 
   # regime 2
   opt_d = results$d
-  fit.vals2 = plot_results$fit.vals2
-  sd.resd2 = sd(res[(opt_idx+1):N]-fit.vals2)
-  sim = sim.fi(N-opt_idx, opt_d, sd.resd2)
+  m = results$m
+  res_mean = scale(res, center = F) # scaling
+  diff_p = c(diffseries_keepmean(matrix(res_mean[(opt_idx+1):N]-m, ncol = 1), opt_d))
+  sd.resd2 = sqrt(mean(diff_p^2))
+  sim = sim.fi(N-opt_idx, opt_d, sd.resd2, mu = m)
   seq_fi = sim$s
 
-  samp = c(fit.vals1 + noise1, seq_fi + fit.vals1[opt_idx])
+  samp = c(fit.vals1 + noise1, seq_fi*plot_results$scaling)
 
   return(list(res=matrix(samp, nrow=1), tim=tim))
 }
+#' @export
+boot_k = function(k, results, plot_results, methodname){
+
+  if (methodname=='step'){
+    samp = bootstrap_sample_step(results, plot_results, seed = k)
+    res = t2cd_step(samp, use_arf = F)
+  }else if (methodname=='sigmoid'){
+    samp = bootstrap_sample_sigmoid(results, plot_results, seed = k)
+    res = t2cd_sigmoid(list(res=matrix(samp$res,1), tim=matrix(samp$tim,1)))
+  }
+  tau_step = res$tau
+  d_step = res$d
+
+  return(list(tau=tau_step, d=d_step))
+}
+

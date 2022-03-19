@@ -1,3 +1,59 @@
+# loglikelihood, penalty to enforce tau within tau.range
+#' @export
+negloglik_pen_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag,
+                                     ll.1.mat, C){
+  alpha0 = param[1]
+  alpha1 = param[2]
+  m = param[3]
+  dfrac = param[4]
+
+  # weights
+  wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
+  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
+             wt_cp,
+             matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
+
+  if (dflag == 'original'){
+    x.2m = x.2-m
+  }else{
+    x.2m = cbind(rep(0, p), x.2-m)
+  }
+  diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
+
+  neglogL = -sum((1-wt)*ll.1.mat) + 0.5*log(2*pi)*sum(wt) + 0.5*sum(wt) +
+    sum(0.5*rowSums(wt)*log(rowSums(wt*diff_p^2)/rowSums(wt))) -
+    p*C*sum(wt_cp[,ncol(wt_cp)] - wt_cp[,1])
+
+  return(neglogL)
+}
+
+# loglikelihood
+#' @export
+loglik_res_sigmoid = function(param, tim_cp, tau.idx, wt_cp, N, p, x.2, dflag, ll.1.mat){
+  alpha0 = param[1]
+  alpha1 = param[2]
+  m = param[3]
+  dfrac = param[4]
+
+  # weights
+  wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
+  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
+             wt_cp,
+             matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
+
+  if (dflag == 'original'){
+    x.2m = x.2-m
+  }else{
+    x.2m = cbind(rep(0, p), x.2-m)
+  }
+  diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
+
+  logL = sum((1-wt)*ll.1.mat) - 0.5*log(2*pi)*sum(wt) - 0.5*sum(wt) -
+    sum(0.5*rowSums(wt)*log(rowSums(wt*diff_p^2)/rowSums(wt)))
+
+  return(logL)
+}
+
 # T2CD-sigmoid method
 # wrapper around search_dtau_sigmoid to fit with both ranges of d
 # and pick the fit with highest likelihood
@@ -14,7 +70,7 @@ t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   # segby, resd.seqby: interval between knots
   # use_scale: if true, scale time series
   res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C, dflag = 'original',
-                         seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale)
+                             seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale)
   # increase C if change point not in candidate range
   multiplier = 2
   while (is.na(res1$tau)){
@@ -39,8 +95,8 @@ softmax = function(a,b){
 # option to initialize tau at multiple indices
 #' @export
 search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
-                           init.tau = c(15, 30, 45), deg = 3, C = 1000, dflag = 'fdiff',
-                           seqby = 1, resd.seqby = 5, use_scale = T){
+                               init.tau = c(15, 30, 45), deg = 3, C = 1000, dflag = 'fdiff',
+                               seqby = 1, resd.seqby = 5, use_scale = T){
   # select data below t.max
   if (is.na(t.max)){
     t.max = min(apply(dat$tim, 1, max, na.rm = T))
@@ -98,65 +154,17 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
     x.2 = t(diff(t(res_mean), 1))
     lastN = N-1
   }
-  # loglikelihood, penalty to enforce tau within tau.range
-  negloglik_pen = function(param){
-    alpha0 = param[1]
-    alpha1 = param[2]
-    m = param[3]
-    dfrac = param[4]
-
-    # weights
-    wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
-    wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-               wt_cp,
-               matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
-
-    if (dflag == 'original'){
-      x.2m = x.2-m
-    }else{
-      x.2m = cbind(rep(0, p), x.2-m)
-    }
-    diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
-
-    neglogL = -sum((1-wt)*ll.1.mat) + 0.5*log(2*pi)*sum(wt) + 0.5*sum(wt) +
-      sum(0.5*rowSums(wt)*log(rowSums(wt*diff_p^2)/rowSums(wt))) -
-      p*C*sum(wt_cp[,ncol(wt_cp)] - wt_cp[,1])
-
-    return(neglogL)
-  }
-
-  # loglikelihood
-  loglik = function(param){
-    alpha0 = param[1]
-    alpha1 = param[2]
-    m = param[3]
-    dfrac = param[4]
-
-    # weights
-    wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
-    wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-               wt_cp,
-               matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
-
-    if (dflag == 'original'){
-      x.2m = x.2-m
-    }else{
-      x.2m = cbind(rep(0, p), x.2-m)
-    }
-    diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
-
-    logL = sum((1-wt)*ll.1.mat) - 0.5*log(2*pi)*sum(wt) - 0.5*sum(wt) -
-      sum(0.5*rowSums(wt)*log(rowSums(wt*diff_p^2)/rowSums(wt)))
-
-    return(logL)
-  }
 
   opt_logL = -Inf
   for (tau_i in init.tau){
     tau_i.idx = which.min(apply(tim <= tau_i, 2, all) == T)
     optim_i = optim(par = c(-tau_i, 1, mean(x.2[tau_i.idx:lastN]), 0),
-                    fn = negloglik_pen, method = "BFGS")
-    logL_i = loglik(optim_i$par)
+                    fn = negloglik_pen_res_sigmoid, method = "BFGS",
+                    tim_cp = tim_cp, tau.idx = tau.idx, N = N, p = p, x.2 = x.2,
+                    dflag = dflag, ll.1.mat = ll.1.mat, C = C)
+    logL_i = loglik_res_sigmoid(optim_i$par,
+                                tim_cp = tim_cp, tau.idx = tau.idx, N = N,
+                                p = p, x.2 = x.2, dflag = dflag, ll.1.mat = ll.1.mat)
     if (logL_i > opt_logL){
       opt_logL = logL_i
       optim_params = optim_i
@@ -196,15 +204,15 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   opt_taurange2[is.na(opt_taurange2)] = tau.range[2]
 
   return(list(res = res, tim = tim, tau.idx = tau.idx,
-              d = opt_d, tau = opt_tau, idx = opt_tau.idx,
+              d = opt_d, tau = opt_tau, m = opt_param[3], idx = opt_tau.idx,
               tau.range1 = opt_taurange1, tau.range2 = opt_taurange2,
               param = opt_param, logL = opt_logL, dflag = dflag))
 }
 
 # plot sequences and fitted lines
 #' @export
-plot.t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
-                         seqby = 1, resd.seqby = 5, return_plot = TRUE){
+plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
+                             seqby = 1, resd.seqby = 5, return_plot = TRUE){
   res = results$res
   tim = results$tim
   tau.idx = results$tau.idx
@@ -238,7 +246,8 @@ plot.t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
   wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
              wt_cp,
-             matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
+             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
+                        N-tau.idx[length(tau.idx)]), p, byrow = F))
 
   # update variables if using original or first difference
   if (dflag == 'original'){
@@ -301,12 +310,41 @@ plot.t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
   if (p ==1){
     opt_tau.idx = results$idx
     return(list(fit.vals = fit.vals,
-                fit.vals1 = fit.vals[1,1:opt_tau.idx], fit.vals2 = fit.vals[1,(opt_tau.idx+1):ncol(fit.vals)],
-                var.resd1 = var.resd1*attributes(res_mean)$'scaled:scale'^2,
-                wt = wt))
+                fit.vals1 = fit1, fit.vals2 = mu.2,
+                var.resd1 = var.resd1,
+                wt = wt, scaling = attributes(res_mean)$'scaled:scale'))
   }else{
     return(list(fit.vals = fit.vals,
                 var.resd1 = var.resd1*attributes(res_mean)$'scaled:scale'^2,
-                wt = wt))
+                wt = wt, scaling = attributes(res_mean)$'scaled:scale'))
   }
+}
+
+# parametric bootstrap using outputs from t2cd_step and plot.t2cd_step
+#' @export
+bootstrap_sample_sigmoid = function(results, plot_results, seed = 0){
+
+  set.seed(seed)
+  res = results$res
+  tim = results$tim
+  N = length(res)
+
+  # regime 1
+  fit.vals1 = plot_results$fit.vals1*plot_results$scaling
+  var.resd1 = plot_results$var.resd1*plot_results$scaling^2
+  noise1 = rnorm(N, 0, sqrt(var.resd1))
+
+  # regime 2
+  opt_d = results$d
+  m = results$m
+  wt = plot_results$wt
+  x.2 = t(scale(t(res), center = F)) # scaling
+  diff_p = t(diffseries_keepmean(t(wt*(x.2-m)), opt_d))
+  sd.resd2 = sqrt(rowSums(wt*diff_p^2)/rowSums(wt))
+  sim = sim.fi(N, opt_d, sd.resd2, mu = m)
+  seq_fi = sim$s
+
+  samp = c((1-wt)*(fit.vals1 + noise1) + wt*(seq_fi)*plot_results$scaling)
+
+  return(list(res=matrix(samp, nrow=1), tim=tim))
 }
