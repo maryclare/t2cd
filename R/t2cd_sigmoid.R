@@ -87,6 +87,7 @@ t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
 # sigmoid
 #' @export
 sigmoid = function(a){return(1/(1+exp(-a)))}
+#' @export
 softmax = function(a,b){
   return(exp(a)/(exp(a) + exp(b)))
 }
