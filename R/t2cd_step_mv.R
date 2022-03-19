@@ -50,6 +50,7 @@ search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     }else{
       x.2 = diff(res_mean[(tau_j):N], 1)
     }
+    # MCG Change: Make sure d and m aren't re-estimated if they are provided
     if (is.null(fix.d) & is.null(fix.m)) {
       # optimizing
       optim.2 = optim(par = c(fix.m, fix.d),
@@ -65,7 +66,7 @@ search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     } else {
       d <- c(d, fix.d)
       m <- c(m, fix.m)
-      ll.2 <- loglik(c(fix.m, fix.d), x.2 = x.2)
+      ll.2 <- loglik_res_step(c(fix.m, fix.d), x.2 = x.2)
     }
 
     M = c(M, ll.1 + ll.2)
