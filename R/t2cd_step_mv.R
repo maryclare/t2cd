@@ -50,16 +50,23 @@ search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     }else{
       x.2 = diff(res_mean[(tau_j):N], 1)
     }
-    # optimizing (why are we optimizing again here??)
-    optim.2 = optim(par = c(fix.m, fix.d),
-                    fn = negloglik_res_step, method = "BFGS", x.2 = x.2)
-    if (dflag == 'original'){
-      d = c(d, optim.2$par[2])
-    }else{
-      d = c(d, optim.2$par[2] + 1)
+    if (is.null(fix.d) & is.null(fix.m)) {
+      # optimizing
+      optim.2 = optim(par = c(fix.m, fix.d),
+                      fn = negloglik_res_step, method = "BFGS", x.2 = x.2)
+      if (dflag == 'original'){
+        d = c(d, optim.2$par[2])
+      }else{
+        d = c(d, optim.2$par[2] + 1)
+      }
+      m = c(m, optim.2$par[1])
+
+      ll.2 = loglik_res_step(optim.2$par, x.2 = x.2)
+    } else {
+      d <- c(d, fix.d)
+      m <- c(m, fix.m)
+      ll.2 <- loglik(c(fix.m, fix.d), x.2 = x.2)
     }
-    m = c(m, optim.2$par[1])
-    ll.2 = loglik_res_step(optim.2$par, x.2 = x.2)
 
     M = c(M, ll.1 + ll.2)
   }
@@ -88,6 +95,7 @@ get.m <- function(x.2, dfrac) {
 }
 
 # helper functions for loglikelihood
+# MCG Change: Compute profile likelihood, profiling out means
 #' @export
 negloglik_res_step_mv = function(param, x.2){
   dfrac = param
