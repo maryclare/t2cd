@@ -29,7 +29,7 @@ negloglik_pen_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag,
 
 # loglikelihood
 #' @export
-loglik_res_sigmoid = function(param, tim_cp, tau.idx, wt_cp, N, p, x.2, dflag, ll.1.mat){
+loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag, ll.1.mat){
   alpha0 = param[1]
   alpha1 = param[2]
   m = param[3]
@@ -185,7 +185,8 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
   wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
              wt_cp,
-             matrix(rep(wt_cp[,ncol(wt_cp)], N-tau.idx[length(tau.idx)]), p, byrow = F))
+             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
+                        N-tau.idx[length(tau.idx)]), p, byrow = F))
   opt_tau.idx = apply(wt, 1, function(x){return(which(x>=0.5, arr.ind = TRUE)[1]-1)})
   opt_tau = c()
   for (k in 1:p){
