@@ -1,5 +1,5 @@
 #' @export
-get.m.sigmoid <- function(wt, ll.1, x.2, dfrac, p) {
+get.m.sigmoid <- function(wt, ll.1, x.2, dfrac, p, C) {
   optim(x.2[1], function(m, wt, ll.1, x.2, dfrac) {
     diff_p = t(diffseries_keepmean(t(wt*(x.2 - m)), dfrac))
 
@@ -27,7 +27,7 @@ negloglik_partial_pen_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.
   m <- rep(NA, nrow(x.2))
   for (k in 1:length(m)) {
     m[k] <- get.m.sigmoid(wt = wt[k, ], ll.1 = ll.1.mat[k, ], x.2 = x.2[k, ],
-                          dfrac = dfrac, p = p)
+                          dfrac = dfrac, p = p, C = C)
   }
   x.2m = x.2-m
   diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
@@ -42,7 +42,7 @@ negloglik_partial_pen_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.
 #' @export
 # loglikelihood
 loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.2, dflag,
-                                 ll.1.mat, alpha0, alpha1){
+                                 ll.1.mat, alpha0, alpha1, C = NULL, m = NULL){
   dfrac = param
 
   # weights
@@ -51,10 +51,12 @@ loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.2, dflag,
              wt_cp,
              matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
                         N-tau.idx[length(tau.idx)]), p, byrow = F))
-  m <- rep(NA, nrow(x.2))
-  for (k in 1:length(m)) {
-    m[k] <- get.m.sigmoid(wt = wt[k, ], ll.1 = ll.1.mat[k, ], x.2 = x.2[k, ],
-                          dfrac = dfrac, p = p)
+  if (is.null(m)) {
+    m <- rep(NA, nrow(x.2))
+    for (k in 1:length(m)) {
+      m[k] <- get.m.sigmoid(wt = wt[k, ], ll.1 = ll.1.mat[k, ], x.2 = x.2[k, ],
+                            dfrac = dfrac, p = p, C = C)
+    }
   }
   x.2m = x.2-m
   diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
@@ -142,13 +144,14 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
   m <- rep(NA, nrow(x.2))
   for (k in 1:length(m)) {
     m[k] <- get.m.sigmoid(wt = wt[k, ], ll.1 = ll.1.mat[k, ], x.2 = x.2[k, ],
-                          dfrac = optim_params$par, p = p)
+                          dfrac = optim_params$par, p = p, C = C)
   }
   opt_param = c(alpha0, alpha1, m, optim_params$par)
   opt_logL = loglik_res_sigmoid_mv(optim_params$par,
                                    tim_cp = tim_cp, tau.idx = tau.idx, N = N,
                                    p = p, x.2 = x.2, dflag = dflag,
-                                   ll.1.mat = ll.1.mat, alpha0 = alpha0, alpha1 = alpha1)
+                                   ll.1.mat = ll.1.mat, alpha0 = alpha0, alpha1 = alpha1,
+                                   m = m)
   opt_d = opt_param[length(opt_param)]
   univ_d = init.param[,4]
 
