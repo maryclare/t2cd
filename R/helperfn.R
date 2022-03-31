@@ -106,6 +106,8 @@ diffseries_keepmean = function(x, d){
   # d: differencing parameter
   if (!is.matrix(x)) {
     x <- matrix(x, nrow = length(x), ncol = 1)
+  } else if (nrow(x) == 1) {
+    x <- t(x)
   }
   N  = nrow(x) # assumes x is N-by-p
   p = ncol(x)

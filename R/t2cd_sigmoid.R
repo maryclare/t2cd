@@ -1,37 +1,8 @@
 # loglikelihood, penalty to enforce tau within tau.range
-#' @export
-negloglik_pen_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag,
-                                     ll.1.mat, C){
-  alpha0 = param[1]
-  alpha1 = param[2]
-  m = param[3]
-  dfrac = param[4]
-
-  # weights
-  wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
-  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
-  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-             wt_cp,
-             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
-                        N-tau.idx[length(tau.idx)]), p, byrow = F))
-
-  if (dflag == 'original'){
-    x.2m = x.2-m
-  }else{
-    x.2m = cbind(rep(0, p), x.2-m)
-  }
-  diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
-
-  neglogL = -sum((1-wt)*ll.1.mat) + 0.5*log(2*pi)*sum(wt) + 0.5*sum(wt) +
-    sum(0.5*rowSums(wt)*log(rowSums(wt*diff_p^2)/rowSums(wt))) -
-    p*C*sum(wt_cp[,ncol(wt_cp)] - wt_cp[,1])
-
-  return(neglogL)
-}
-
 # loglikelihood
 #' @export
-loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag, ll.1.mat){
+loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, ll.1.mat,
+                              pen = FALSE, C = NULL, use_t = FALSE){
   alpha0 = param[1]
   alpha1 = param[2]
   m = param[3]
@@ -45,15 +16,21 @@ loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag, ll.1.mat
              matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
                         N-tau.idx[length(tau.idx)]), p, byrow = F))
 
-  if (dflag == 'original'){
-    x.2m = x.2-m
-  }else{
-    x.2m = cbind(rep(0, p), x.2-m)
-  }
-  diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
+  if (use_t) {
+    sd = param[5]
+    df = param[6]
+  } else {
+    x.2m <- x.2 - m
 
-  logL = sum((1-wt)*ll.1.mat) - 0.5*log(2*pi)*sum(wt) - 0.5*sum(wt) -
-    sum(0.5*rowSums(wt)*log(rowSums(wt*diff_p^2)/rowSums(wt)))
+    diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
+    sd <- sqrt(sum(wt*diff_p^2)/sum(wt))
+  }
+
+  logL = sum((1-wt)*ll.1.mat) +
+    ifelse(!use_t,
+           loglik_res_step(par = c(dfrac, m, sd), x.2 = x.2, wt = wt),
+           loglik_t_res_step(par = c(dfrac, m, sd, df), x.2 = x.2, wt = wt)) +
+    ifelse(pen, p*C*sum(wt_cp[,ncol(wt_cp)] - wt_cp[,1]), 0)
 
   return(logL)
 }
@@ -64,7 +41,8 @@ loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, dflag, ll.1.mat
 #' @export
 t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
                         init.tau = c(15, 30, 45), deg = 3, C = 1000,
-                        seqby = 1, resd.seqby = 5, use_scale = TRUE){
+                        seqby = 1, resd.seqby = 5, use_scale = TRUE,
+                        use_t = FALSE){
   # dat: input time series
   # t.max: cutoff for time considered
   # tau.range candidate change point range
@@ -73,14 +51,16 @@ t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   # C: regularization coefficient
   # segby, resd.seqby: interval between knots
   # use_scale: if true, scale time series
-  res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C, dflag = 'original',
-                             seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale)
+  res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C,
+                             seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale,
+                             use_t = use_t)
   # increase C if change point not in candidate range
   multiplier = 2
   while (is.na(res1$tau)){
     C_new = multiplier*C
-    res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C_new, dflag = 'original',
-                               seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale)
+    res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C_new,
+                               seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale,
+                               use_t = use_t)
     multiplier = multiplier + 1
   }
   return(res1)
@@ -100,8 +80,9 @@ softmax = function(a,b){
 # option to initialize tau at multiple indices
 #' @export
 search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
-                               init.tau = c(15, 30, 45), deg = 3, C = 1000, dflag = 'fdiff',
-                               seqby = 1, resd.seqby = 5, use_scale = T){
+                               init.tau = c(15, 30, 45), deg = 3, C = 1000,
+                               seqby = 1, resd.seqby = 5, use_scale = T,
+                               use_t = FALSE){
   # select data below t.max
   if (is.na(t.max)){
     t.max = min(apply(dat$tim, 1, max, na.rm = T))
@@ -124,23 +105,6 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   tau.idx = which(apply(tim >= tau.range[1] & tim <= tau.range[2], 2, all))
   tim_cp = matrix(tim[,tau.idx], nrow = nrow(tim))
 
-  tol = 0.01
-  # determine range of d to search
-  if (is.null(dflag)){
-    tau_last = tau.idx[length(tau.idx)]
-    dfrac_p = rep(0, p)
-    for (k in 1:p){
-      x.last = res_mean[k,(tau_last+1):N]
-      arf = arfima::arfima(x.last)
-      dfrac_p[k] = arf$modes[[1]]$dfrac
-    }
-    if ((0.5-mean(dfrac_p)) < tol){
-      dflag = 'fdiff' # likelihood evaluated on first differences
-    }else{
-      dflag = 'original' # likelihood evaluated on original series
-    }
-  }
-
   # optimize for spline component
   ll.1.mat = matrix(ncol = N, nrow = 0)
   for (k in 1:p){
@@ -152,24 +116,28 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
     ll.1.mat = rbind(ll.1.mat, ll.1.vec)
   }
 
-  if (dflag == 'original'){
-    x.2 = res_mean
-    lastN = N
-  }else{
-    x.2 = t(diff(t(res_mean), 1))
-    lastN = N-1
-  }
+  x.2 = res_mean
+  lastN = N
 
   opt_logL = -Inf
   for (tau_i in init.tau){
     tau_i.idx = which.min(apply(tim <= tau_i, 2, all) == T)
-    optim_i = optim(par = c(-tau_i, 1, mean(x.2[tau_i.idx:lastN]), 0),
-                    fn = negloglik_pen_res_sigmoid, method = "BFGS",
+    start <- c(-tau_i, 1, mean(x.2[tau_i.idx:lastN]), 0)
+    lower <- rep(Inf, length(start))
+    upper <- rep(Inf, length(start))
+    if (use_t) {
+      start <- c(start, sd(x.2[tau_i.idx:lastN]), 3)
+      lower <- c(lower, -Inf, 2 + 10^(-14))
+      upper <- c(upper, Inf, 300)
+    }
+    optim_i = optim(par = start,
+                    fn = loglik_res_sigmoid, method = "L-BFGS-B",
                     tim_cp = tim_cp, tau.idx = tau.idx, N = N, p = p, x.2 = x.2,
-                    dflag = dflag, ll.1.mat = ll.1.mat, C = C)
+                    ll.1.mat = ll.1.mat, pen = TRUE, C = C,
+                    control = list("fnscale" = -1), use_t = use_t)
     logL_i = loglik_res_sigmoid(optim_i$par,
                                 tim_cp = tim_cp, tau.idx = tau.idx, N = N,
-                                p = p, x.2 = x.2, dflag = dflag, ll.1.mat = ll.1.mat)
+                                p = p, x.2 = x.2, ll.1.mat = ll.1.mat, use_t = use_t)
     if (logL_i > opt_logL){
       opt_logL = logL_i
       optim_params = optim_i
@@ -179,11 +147,9 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   opt_param = optim_params$par
   alpha0 = opt_param[1]
   alpha1 = opt_param[2]
-  if (dflag == 'original'){
-    opt_d = opt_param[4]
-  }else{
-    opt_d = opt_param[4] + 1
-  }
+  opt_m = opt_param[3]
+  opt_d = opt_param[4]
+
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
@@ -210,10 +176,20 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   opt_taurange1[is.na(opt_taurange1)] = tau.range[1]
   opt_taurange2[is.na(opt_taurange2)] = tau.range[2]
 
-  return(list(res = res, tim = tim, tau.idx = tau.idx,
-              d = opt_d, tau = opt_tau, m = opt_param[3], idx = opt_tau.idx,
+  if (use_t) {
+    opt_sd = abs(opt_param[5])
+    opt_df = opt_param[6]
+  } else {
+    diff_p = t(diffseries_keepmean(t(wt*(x.2 - opt_m)), opt_d))
+    opt_sd <- sqrt(sum(wt*diff_p^2)/sum(wt))
+    opt_df = NA
+  }
+
+  return(list(res = res, tim = tim, tau.idx = tau.idx, m = opt_m,
+              sd = opt_sd, df = opt_df,
+              d = opt_d, tau = opt_tau, idx = opt_tau.idx,
               tau.range1 = opt_taurange1, tau.range2 = opt_taurange2,
-              param = opt_param, logL = opt_logL, dflag = dflag))
+              param = opt_param, logL = opt_logL))
 }
 
 # plot sequences and fitted lines
@@ -223,7 +199,6 @@ plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
   res = results$res
   tim = results$tim
   tau.idx = results$tau.idx
-  dflag = results$dflag
   res_mean = t(scale(t(res), center = F)) # scaling
   N = ncol(res_mean)
   p = nrow(res_mean)
@@ -258,29 +233,13 @@ plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
                         N-tau.idx[length(tau.idx)]), p, byrow = F))
 
   # update variables if using original or first difference
-  if (dflag == 'original'){
-    x.2 = res_mean
-    d = opt_d
-    diff_p = t(diffseries_keepmean(t(wt*(x.2-m)), d))
-  }else{
-    x.2 = cbind(0, t(diff(t(res_mean), 1))-m)
-    d = opt_d - 1
-    diff_p = t(diffseries_keepmean(t(wt*x.2), d))
-  }
+  x.2 = res_mean
+  d = opt_d
+  diff_p = t(diffseries_keepmean(t(wt*(x.2-m)), d))
 
-  if (dflag == 'original'){
-    mu.2 = wt*(x.2-m) - diff_p
-    fit.vals = (mu.2 + wt*m)*attributes(res_mean)$'scaled:scale' +
-      (1-wt)*fit1*attributes(res_mean)$'scaled:scale'
-  }else{
-    diff.2 = wt*x.2 - diff_p
-    mu.2 = matrix(nrow = p, ncol = 0)
-    for (i in 1:N){
-      mu.2 = cbind(mu.2, res_mean[,i] + diff.2[,i])
-    }
-    fit.vals = (wt*mu.2)*attributes(res_mean)$'scaled:scale' +
-      (1-wt)*fit1*attributes(res_mean)$'scaled:scale'
-  }
+  mu.2 = wt*(x.2-m) - diff_p
+  fit.vals = (mu.2 + wt*m)*attributes(res_mean)$'scaled:scale' +
+  (1-wt)*fit1*attributes(res_mean)$'scaled:scale'
 
   # plotting
   if (return_plot){

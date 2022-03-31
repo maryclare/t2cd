@@ -1,34 +1,40 @@
 # helper functions for loglikelihood
 #' @export
-loglik_res_step = function(par, x.2){
-  dfrac = par
-  mean <- sum(diffseries_keepmean(x.2, dfrac)*diffseries_keepmean(rep(1, length(x.2)), dfrac))/
-    sum(diffseries_keepmean(rep(1, length(x.2)), dfrac)^2)
-  sd <- sqrt(mean(c(diffseries_keepmean(x.2-mean, dfrac))^2))
+loglik_res_step = function(par, x.2, wt = rep(1, length(x.2))){
 
-  logL = loglik_norm(x.2 = x.2, dfrac = dfrac, mean = mean, sd = sd)
+  dfrac = par[1]
+  if (length(par) == 1) {
+    # Need to update this for when wt is provided
+    mean <- sum(diffseries_keepmean(x.2, dfrac)*diffseries_keepmean(rep(1, length(x.2)), dfrac))/
+      sum(diffseries_keepmean(rep(1, length(x.2)), dfrac)^2)
+    sd <- sqrt(mean(c(diffseries_keepmean(x.2-mean, dfrac))^2))
+  } else {
+    mean = par[2]
+    sd = par[3]
+  }
+  logL = loglik_norm(x.2 = x.2, dfrac = dfrac, mean = mean, sd = sd, wt = wt)
 
   return(logL)
 }
 #' @export
-loglik_t_res_step = function(par, x.2){
+loglik_t_res_step = function(par, x.2, wt = rep(1, length(x.2))) {
   dfrac = par[1]
   mean = par[2]
   sd = par[3]
   df = par[4]
-  logL = loglik_t(x.2 = x.2, dfrac = dfrac, mean = mean, sd = sd, df = df)
+  logL = loglik_t(x.2 = x.2, dfrac = dfrac, mean = mean, sd = sd, df = df, wt = wt)
 
   return(logL)
 }
 #' @export
-loglik_t = function(x.2, dfrac, mean, sd, df) {
-  diff_p = c(diffseries_keepmean(x.2-mean, dfrac))
-  sum(ldt_mc(x = diff_p, mean = 0, sd = sd, df = df))
+loglik_t = function(x.2, dfrac, mean, sd, df, wt = rep(1, length(x.2))) {
+  diff_p = c(diffseries_keepmean(wt*(x.2-mean), dfrac))
+  sum(wt*ldt_mc(x = diff_p, mean = 0, sd = sd, df = df))
 }
 #' @export
-loglik_norm = function(x.2, dfrac, mean, sd) {
-  diff_p = c(diffseries_keepmean(x.2-mean, dfrac))
-  sum(ldnorm_mc(x = diff_p, mean = 0, sd = sd))
+loglik_norm = function(x.2, dfrac, mean, sd, wt = rep(1, length(x.2))) {
+  diff_p = c(diffseries_keepmean(wt*(x.2-mean), dfrac))
+  sum(wt*ldnorm_mc(x = diff_p, mean = 0, sd = sd))
 }
 #' @export
 ldt_mc <- function(x, mean, sd, df) {
