@@ -1,36 +1,42 @@
 # loglikelihood, penalty to enforce tau within tau.range
 # loglikelihood
 #' @export
-loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, ll.1.mat,
+loglik_res_sigmoid = function(param, tim_cp, tau.idx, x.2, ll.1,
                               pen = FALSE, C = NULL, use_t = FALSE){
   alpha0 = param[1]
   alpha1 = param[2]
-  m = param[3]
-  dfrac = param[4]
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
   # MCG Change: Updated this to make sure that the last weights aren't equal to 0
-  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-             wt_cp,
-             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
-                        N-tau.idx[length(tau.idx)]), p, byrow = F))
+  wt = c(rep(wt_cp[1], tau.idx[1]-1),
+         wt_cp,
+         rep(ifelse(wt_cp[length(wt_cp)] != 0, wt_cp[length(wt_cp)], 1),
+             length(x.2)-tau.idx[length(tau.idx)]))
+
+  dfrac = param[3]
 
   if (use_t) {
-    sd = param[5]
-    df = param[6]
-  } else {
-    x.2m <- x.2 - m
-
-    diff_p = t(diffseries_keepmean(t(wt*(x.2m)), dfrac))
-    sd <- sqrt(sum(wt*diff_p^2)/sum(wt))
+    df = param[length(param)]
   }
 
-  logL = sum((1-wt)*ll.1.mat) +
+  if ((length(param) == 3 & !use_t)) {
+    m <- get.m(x.2 = x.2, dfrac = dfrac, wt = wt)
+    sd <- get.sd(x.2 = x.2, dfrac = dfrac, mean = m, wt = wt)
+  } else if (length(param) == 4 & !use_t) {
+    m <- param[4]
+    sd <- get.sd(x.2 = x.2, dfrac = dfrac, mean = m, wt = wt)
+  } else if ((length(param) == 5) & !use_t | use_t) {
+    m <- param[4]
+    sd <- param[5]
+  }
+
+
+  logL = sum((1-wt)*ll.1) +
     ifelse(!use_t,
            loglik_res_step(par = c(dfrac, m, sd), x.2 = x.2, wt = wt),
            loglik_t_res_step(par = c(dfrac, m, sd, df), x.2 = x.2, wt = wt)) +
-    ifelse(pen, p*C*sum(wt_cp[,ncol(wt_cp)] - wt_cp[,1]), 0)
+    ifelse(pen, C*sum(wt_cp[length(wt_cp)] - wt_cp[1]), 0)
 
   return(logL)
 }
@@ -42,7 +48,7 @@ loglik_res_sigmoid = function(param, tim_cp, tau.idx, N, p, x.2, ll.1.mat,
 t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
                         init.tau = c(15, 30, 45), deg = 3, C = 1000,
                         seqby = 1, resd.seqby = 5, use_scale = TRUE,
-                        use_t = FALSE){
+                        use_t = FALSE, prof = TRUE){
   # dat: input time series
   # t.max: cutoff for time considered
   # tau.range candidate change point range
@@ -53,14 +59,14 @@ t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   # use_scale: if true, scale time series
   res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C,
                              seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale,
-                             use_t = use_t)
+                             use_t = use_t, prof = prof)
   # increase C if change point not in candidate range
   multiplier = 2
   while (is.na(res1$tau)){
     C_new = multiplier*C
     res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C_new,
                                seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale,
-                               use_t = use_t)
+                               use_t = use_t, prof = prof)
     multiplier = multiplier + 1
   }
   return(res1)
@@ -82,7 +88,7 @@ softmax = function(a,b){
 search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
                                init.tau = c(15, 30, 45), deg = 3, C = 1000,
                                seqby = 1, resd.seqby = 5, use_scale = T,
-                               use_t = FALSE){
+                               use_t = FALSE, prof = TRUE){
   # select data below t.max
   if (is.na(t.max)){
     t.max = min(apply(dat$tim, 1, max, na.rm = T))
@@ -99,22 +105,18 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
     res_mean = res
   }
   N = ncol(res_mean)
-  p = nrow(res_mean)
 
   # points in change range
   tau.idx = which(apply(tim >= tau.range[1] & tim <= tau.range[2], 2, all))
   tim_cp = matrix(tim[,tau.idx], nrow = nrow(tim))
 
   # optimize for spline component
-  ll.1.mat = matrix(ncol = N, nrow = 0)
-  for (k in 1:p){
-    fit1 = refitWLS(tim[k,], res_mean[k,], deg = deg,
-                    seqby = seqby, resd.seqby = resd.seqby)
-    resd1 = res_mean[k,] - fit1$fit.vals
-    var.resd1 = fit1$var.resd
-    ll.1.vec = dnorm(resd1, log = TRUE, sd = sqrt(var.resd1))
-    ll.1.mat = rbind(ll.1.mat, ll.1.vec)
-  }
+
+  fit1 = refitWLS(tim, res_mean, deg = deg,
+                  seqby = seqby, resd.seqby = resd.seqby)
+  resd1 = res_mean - fit1$fit.vals
+  var.resd1 = fit1$var.resd
+  ll.1 = dnorm(resd1, log = TRUE, sd = sqrt(var.resd1))
 
   x.2 = res_mean
   lastN = N
@@ -122,22 +124,28 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   opt_logL = -Inf
   for (tau_i in init.tau){
     tau_i.idx = which.min(apply(tim <= tau_i, 2, all) == T)
-    start <- c(-tau_i, 1, mean(x.2[tau_i.idx:lastN]), 0)
-    lower <- rep(Inf, length(start))
+    start <- c(-tau_i, 1, 0)
+    lower <- rep(-Inf, length(start))
     upper <- rep(Inf, length(start))
+    if (!prof & !use_t) {
+      start <- c(start, mean(x.2[tau_i.idx:lastN]), sd(x.2[tau_i.idx:lastN]))
+      lower <- c(lower, rep(-Inf, 2))
+      upper <- c(upper, rep(Inf, 2))
+    }
     if (use_t) {
-      start <- c(start, sd(x.2[tau_i.idx:lastN]), 3)
-      lower <- c(lower, -Inf, 2 + 10^(-14))
-      upper <- c(upper, Inf, 300)
+      start <- c(start, mean(x.2[tau_i.idx:lastN]), sd(x.2[tau_i.idx:lastN]), 3)
+      lower <- c(lower, -Inf, -Inf, 2 + 10^(-14))
+      upper <- c(upper, Inf, Inf, 300)
     }
     optim_i = optim(par = start,
                     fn = loglik_res_sigmoid, method = "L-BFGS-B",
-                    tim_cp = tim_cp, tau.idx = tau.idx, N = N, p = p, x.2 = x.2,
-                    ll.1.mat = ll.1.mat, pen = TRUE, C = C,
-                    control = list("fnscale" = -1), use_t = use_t)
+                    tim_cp = tim_cp, tau.idx = tau.idx, x.2 = x.2,
+                    ll.1 = ll.1, pen = TRUE, C = C,
+                    control = list("fnscale" = -1), use_t = use_t,
+                    lower = lower, upper = upper)
     logL_i = loglik_res_sigmoid(optim_i$par,
-                                tim_cp = tim_cp, tau.idx = tau.idx, N = N,
-                                p = p, x.2 = x.2, ll.1.mat = ll.1.mat, use_t = use_t)
+                                tim_cp = tim_cp, tau.idx = tau.idx,
+                                x.2 = x.2, ll.1 = ll.1, use_t = use_t)
     if (logL_i > opt_logL){
       opt_logL = logL_i
       optim_params = optim_i
@@ -147,41 +155,39 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   opt_param = optim_params$par
   alpha0 = opt_param[1]
   alpha1 = opt_param[2]
-  opt_m = opt_param[3]
-  opt_d = opt_param[4]
+  opt_d = opt_param[3]
 
 
   # weights
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
   # MCG Change: Updated this to make sure that the last weights aren't equal to 0
-  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-             wt_cp,
-             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
-                        N-tau.idx[length(tau.idx)]), p, byrow = F))
-  opt_tau.idx = apply(wt, 1, function(x){return(which(x>=0.5, arr.ind = TRUE)[1]-1)})
-  opt_tau = c()
-  for (k in 1:p){
-    opt_tau = c(opt_tau, tim[k,opt_tau.idx[k]])
-  }
+  wt = c(rep(wt_cp[1], tau.idx[1]-1),
+         wt_cp,
+         rep(ifelse(wt_cp[length(wt_cp)] != 0, wt_cp[length(wt_cp)], 1),
+             length(x.2)-tau.idx[length(tau.idx)]))
+  opt_tau.idx = which(wt>=0.5, arr.ind = TRUE)[1]-1
+  opt_tau = tim[opt_tau.idx[1]]
 
   # range of change location
-  opt_taurange1.idx = apply(wt, 1, function(x){return(which(x>=0.1, arr.ind = TRUE)[1])})
-  opt_taurange2.idx = apply(wt, 1, function(x){return(which(x>=0.9, arr.ind = TRUE)[1]-1)})
-  opt_taurange1 = c()
-  opt_taurange2 = c()
-  for (k in 1:p){
-    opt_taurange1 = c(opt_taurange1, tim[k,opt_taurange1.idx[k]])
-    opt_taurange2 = c(opt_taurange2, tim[k,opt_taurange2.idx[k]])
-  }
+  opt_taurange1.idx = which(wt>=0.1, arr.ind = TRUE)[1]-1
+  opt_taurange2.idx = which(wt>=0.9, arr.ind = TRUE)[1]-1
+  opt_taurange1 = tim[opt_taurange1.idx[1]]
+  opt_taurange2 = tim[opt_taurange2.idx[1]]
   opt_taurange1[is.na(opt_taurange1)] = tau.range[1]
   opt_taurange2[is.na(opt_taurange2)] = tau.range[2]
 
   if (use_t) {
-    opt_sd = abs(opt_param[5])
-    opt_df = opt_param[6]
+    opt_m <- opt_param[4]
+    opt_sd <- abs(opt_param[5])
+    opt_df <- opt_param[6]
   } else {
-    diff_p = t(diffseries_keepmean(t(wt*(x.2 - opt_m)), opt_d))
-    opt_sd <- sqrt(sum(wt*diff_p^2)/sum(wt))
+    if (prof) {
+      opt_m <- get.m(x.2 = x.2, dfrac = opt_d, wt = wt)
+      opt_sd <- get.sd(x.2 = x.2, dfrac = opt_d, mean = opt_m, wt = wt)
+    } else if (!prof) {
+      opt_m <- opt_param[4]
+      opt_sd <- abs(opt_param[5])
+    }
     opt_df = NA
   }
 

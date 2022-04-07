@@ -2,10 +2,9 @@
 # return the likelihood for each combination
 #' @export
 search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
-                           dflag = 'original', seqby = 1, resd.seqby = 5,
-                           use_arf = FALSE, use_scale = TRUE,
-                           fix.d = NULL, fix.m = NULL){
-  stopifnot(use_arf==FALSE)
+                           seqby = 1, resd.seqby = 5,
+                           use_scale = TRUE,
+                           fix.d = NULL, fix.m = NULL, fix.sd = NULL, fix.df = NA, use_t = FALSE){
 
   # select data below t.max
   if (is.na(t.max)){
@@ -26,9 +25,11 @@ search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 
   # initialize result vectors
   tau.idx = which(tim >= tau.range[1] & tim <= tau.range[2])
-  M = c()
-  d = c()
-  m = c()
+  M <- c()
+  d <- c()
+  m <- c()
+  sd <- c()
+  df <- c()
 
   # iterate through each tau, return log-likelihood
   for (j in 1:length(tau.idx)){
@@ -44,72 +45,66 @@ search_tau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     var.resd1.1 = fit1$var.resd
     ll.1 = sum(dnorm(resd1.1, log = TRUE, sd = sqrt(var.resd1.1)))
 
-    # optimize for ARFIMA
-    if (dflag == 'original'){
-      x.2 = res_mean[(tau_j+1):N]
-    }else{
-      x.2 = diff(res_mean[(tau_j):N], 1)
-    }
+    x.2 = res_mean[(tau_j+1):N]
     # MCG Change: Make sure d and m aren't re-estimated if they are provided
-    if (is.null(fix.d) & is.null(fix.m)) {
-      # optimizing
-      optim.2 = optim(par = c(fix.m, fix.d),
-                      fn = negloglik_res_step, method = "BFGS", x.2 = x.2)
-      if (dflag == 'original'){
-        d = c(d, optim.2$par[2])
-      }else{
-        d = c(d, optim.2$par[2] + 1)
-      }
-      m = c(m, optim.2$par[1])
-
-      ll.2 = loglik_res_step(optim.2$par, x.2 = x.2)
+    d <- c(d, fix.d)
+    m <- c(m, fix.m)
+    sd <- c(sd, fix.sd)
+    df <- c(df, fix.df)
+    if (!use_t) {
+      ll.2 <- loglik_res_step(fix.d, x.2 = x.2)
     } else {
-      d <- c(d, fix.d)
-      m <- c(m, fix.m)
-      ll.2 <- loglik_res_step(c(fix.m, fix.d), x.2 = x.2)
+      ll.2 <- loglik_t_res_step(c(fix.d, fix.m, fix.sd, fix.df), x.2 = x.2)
     }
 
     M = c(M, ll.1 + ll.2)
   }
 
   # tau and d at maximum log-likelihood
-  M_df = data.frame(tau = tim[tau.idx], M = M, d = d, m = m)
+  M_df = data.frame(tau = tim[tau.idx], M = M, d = d, m = m, sd = sd, df = df)
   max.idx = which.max(M)
   max.tau = tim[tau.idx[max.idx]]
   max.d = d[max.idx]
   max.m = m[max.idx]
+  max.sd = sd[max.idx]
+  max.df = df[max.idx]
 
   return(list(M_df = M_df, res = res, tim = tim, tau.idx = tau.idx,
-              tau = max.tau, d = max.d, m = max.m,
-              idx = tau.idx[max.idx], logL = M[max.idx],
-              dflag = dflag))
+              tau = max.tau, d = max.d, m = max.m,  sd = max.sd, df = max.df,
+              idx = tau.idx[max.idx], logL = M[max.idx]))
 
-}
-
-#' @export
-get.m <- function(x.2, dfrac) {
-  optim(x.2[1], function(m, x.2, dfrac) {
-    diff_p = t(diffseries_keepmean(t(x.2-m), dfrac))
-    sum(diff_p^2)
-  }, x.2 = x.2, dfrac = dfrac, method = "Brent",
-  lower = min(x.2), upper = max(x.2))$par
 }
 
 # helper functions for loglikelihood
 # MCG Change: Compute profile likelihood, profiling out means
 #' @export
-negloglik_res_step_mv = function(param, x.2){
-  dfrac = param
-
-  n.2 = rowSums(!is.na(x.2))
-  m <- rep(NA, nrow(x.2))
-  for (k in 1:length(m)) {
-    m[k] <- get.m(x.2 = na.omit(x.2[k, ]), dfrac = dfrac)
+negloglik_res_step_mv = function(param, x.2, use_t = FALSE){
+  dfrac = param[1]
+  if (use_t) {
+    p <- nrow(x.2)
+    mean <- param[1 + 1:p]
+    sd <- param[1 + p + 1:p]
+    df <- param[1 + 2*p + 1:p]
   }
-  diff_p = t(diffseries_keepmean(t(x.2-m), dfrac))
 
-  diff_p[diff_p==0] = NA
-  neglogL = sum(n.2*log(rowMeans(diff_p^2, na.rm = T)))
+  neglogL <- 0
+  for (k in 1:nrow(x.2)) {
+    if (!use_t) {
+      nll <- -loglik_res_step(par = dfrac, x.2 = na.omit(x.2[k, ]))
+    } else {
+      nll <- -loglik_t_res_step(par = c(dfrac, mean[k], sd[k], df[k]), x.2 = na.omit(x.2[k, ]))
+    }
+    neglogL <- neglogL + nll
+  }
+  # n.2 = rowSums(!is.na(x.2))
+  # m <- rep(NA, nrow(x.2))
+  # for (k in 1:length(m)) {
+  #   m[k] <- get.m(x.2 = na.omit(x.2[k, ]), dfrac = dfrac)
+  # }
+  # diff_p = t(diffseries_keepmean(t(x.2-m), dfrac))
+  #
+  # diff_p[diff_p==0] = NA
+  # neglogL = sum(n.2*log(rowMeans(diff_p^2, na.rm = T)))
 
   return(neglogL)
 }
@@ -119,14 +114,13 @@ negloglik_res_step_mv = function(param, x.2){
 #' @export
 t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                         seqby = 1, resd.seqby = 5,
-                        use_arf = TRUE, use_scale = TRUE,
-                        maxiter=10, tol=1e-6){
+                        use_scale = TRUE,
+                        maxiter=10, tol=1e-6, use_t = FALSE){
   # dat: input time series
   # t.max: cutoff for time considered
   # tau.range candidate change point range
   # deg: degree for B-spline
   # seqby, resd.seqby: interval between knots
-  # use_arf: if true, use arfima estimates from arfima package
   # use_scale: if true, scale time series
   # maxiter: maximum number of iterations solving for tau and FI parameters
   # tol: stops iterating if difference between the most recent objective values is below tol
@@ -151,7 +145,9 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   iter_k = 1
   iter_flag = TRUE
   neglogL_prev = Inf
-  init.d = init.m = fix.d = fix.m = init.tau = init.idx = tau = idx = rep(NA, p)
+  init.d = init.m = init.sd = init.df =
+    fix.d = fix.m = fix.sd = fix.df =
+    init.tau = init.idx = tau = idx = rep(NA, p)
   hist.d = hist.neglogL = c()
 
   while (iter_flag){
@@ -162,18 +158,24 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
       if (iter_k==1){
         res_k = t2cd_step(list(res=res[k,], tim=tim[k,]), t.max, tau.range, deg,
                           seqby = seqby, resd.seqby = resd.seqby,
-                          use_arf = use_arf, use_scale = use_scale)
+                          use_scale = use_scale, use_t = use_t)
         init.d[k] = res_k$d
         init.m[k] = res_k$m
+        init.sd[k] = res_k$sd
+        init.df[k] = res_k$df
         init.tau[k] = res_k$tau
         init.idx[k] = res_k$idx
       }else{
         res_k = search_tau_step(list(res=res[k,], tim=tim[k,]), t.max, tau.range, deg,
                                 seqby = seqby, resd.seqby = resd.seqby,
-                                use_arf = use_arf, use_scale = use_scale,
-                                fix.d = d_current, fix.m = m_current[k])
+                                use_scale = use_scale,
+                                fix.d = d_current, fix.m = m_current[k],
+                                fix.sd = sd_current[k], fix.df = df_current[k],
+                                use_t = use_t)
         fix.d[k] = res_k$d
         fix.m[k] = res_k$m
+        fix.sd[k] = res_k$sd
+        fix.df[k] = res_k$df
         tau[k] = res_k$tau
         idx[k] = res_k$idx
       }
@@ -182,27 +184,41 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     print(res_k$idx)
 
     # preprocessing
-    dflag = 'original'
     if (use_scale){
       reg2 = t(scale(t(reg2), center = F))
     }
     x.2 = reg2
     if (iter_k==1){
-      init.d.2 = init.d
-      init.m.2 = init.m
       d_current = mean(init.d)
+      m_current = init.m
+      sd_current = init.sd
+      df_current = init.df
     }
 
-    # optimizing
+    # optimizing over d, m (fixed taus, I think)
+    if (!use_t) {
     optim_params = optim(par = d_current,
                          fn = negloglik_res_step_mv, method = "Brent", lower = -10,
                          upper = 10, x.2 = x.2)
     d_current = optim_params$par
-    m_current = rep(NA, nrow(res))
-    for (k in 1:length(m_current)) {
-      m_current[k] <-  get.m(x.2 = na.omit(x.2[k, ]), dfrac = d_current)
+    df_current <- sd_current <- m_current <- rep(NA, nrow(res))
+    for (l in 1:length(m_current)) {
+      m_current[l] <-  get.m(x.2 = na.omit(x.2[l, ]), dfrac = d_current)
+      sd_current[l] <-  get.sd(x.2 = na.omit(x.2[l, ]), dfrac = d_current, mean = m_current[l])
     }
-    neglogL_current = negloglik_res_step_mv(optim_params$par, x.2 = x.2)
+    neglogL_current = optim_params$value
+    } else {
+      optim_params = optim(par = c(d_current, m_current, sd_current, df_current),
+                           fn = negloglik_res_step_mv, method = "L-BFGS-B",
+                           lower = c(-Inf, rep(c(-Inf, -Inf, 2 + 10^(-14)), each = length(m_current))),
+                           upper = c(Inf, rep(c(Inf, Inf, 300), each = length(m_current))),
+                           x.2 = x.2, use_t = use_t)
+      d_current = optim_params$par[1]
+      m_current = optim_params$par[1 + 1:length(m_current)]
+      sd_current = optim_params$par[(1 + length(m_current)) + 1:length(m_current)]
+      df_current = optim_params$par[(1 + 2*length(m_current)) + 1:length(m_current)]
+      neglogL_current = optim_params$value
+    }
 
     # update iter_flag
     if (iter_k==maxiter | abs(neglogL_prev-neglogL_current)<tol){
@@ -219,20 +235,19 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 
   return(list(res = res, tim = tim, tau.idx = tau.idx,
               tau = tau, idx = idx, d = d_current,
-              m = m_current,
+              m = m_current, sd = sd_current, df = df_current,
               univ_tau = init.tau, univ_idx = init.idx, univ_d = init.d,
               hist.d = hist.d, hist.neglogL = hist.neglogL,
-              iter_k = iter_k, dflag = dflag))
+              iter_k = iter_k))
 }
 
 # plot sequences and fitted lines
 #' @export
 plot_t2cd_step_mv = function(results, tau.range = c(10, 50), deg = 3,
-                             use_arf = TRUE, use_scale = TRUE, return_plot = TRUE){
+                             use_scale = TRUE, return_plot = TRUE){
   res = results$res
   tim = results$tim
   tau.idx = results$tau.idx
-  dflag = results$dflag
   if (use_scale){
     res_mean = t(scale(t(res), center = F)) # scaling
   }else{
@@ -255,48 +270,12 @@ plot_t2cd_step_mv = function(results, tau.range = c(10, 50), deg = 3,
     mu[k, ] = c(f1$fit.vals, rep(NA, N-opt_idx[k]))
 
     # fitted values for second regime
-    if (use_arf){
-      # # Has not been updated for MV setting
-      # if (dflag == 'original'){
-      #   x.2 = res_mean[(opt_idx+1):N]
-      #   arf = arfima::arfima(x.2)
-      #   fit = arf$modes[[1]]$muHat + arf$modes[[1]]$fitted
-      #   mu[(opt_idx+1):N] = fit
-      # }else{
-      #   x.2 = res_mean[(opt_idx):N]
-      #   n.2 = length(x.2) - 1
-      #   arf = arfima::arfima(diff(x.2, 1))
-      #   diff.2 = arf$modes[[1]]$muHat + arf$modes[[1]]$fitted
-      #   mu.2 = c()
-      #   for (i in 1:n.2){
-      #     mu.2 = c(mu.2, x.2[i] + diff.2[i])
-      #   }
-      #   mu[(opt_idx+1):N] = mu.2
-      # }
-    }else{
-      m = results$m[k]
-      if (dflag == 'original'){
-        x.2 = res_mean[k, (opt_idx[k]+1):N]
-        diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), opt_d))
-      }else{
-        # # Has not been updated for MV setting
-        # x.2 = c(0, diff(res_mean[k, (opt_idx+1):N]-m, 1))
-        # diff_p = c(diffseries_keepmean(matrix(x.2, ncol = 1), opt_d - 1))
-      }
+    m = results$m[k]
+    x.2 = res_mean[k, (opt_idx[k]+1):N]
+    diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), opt_d))
 
-      if (dflag == 'original'){
-        mu.2 = (x.2 - m) - diff_p
-        mu[k, (opt_idx[k]+1):N] = mu.2 + m
-      }else{
-        # # Has not been updated for MV setting
-        # diff.2 = x.2 - diff_p
-        # mu.2 = c()
-        # for (i in (opt_idx+1):N){
-        #   mu.2 = c(mu.2, res_mean[i] + diff.2[i-opt_idx])
-        # }
-        # mu[k, (opt_idx+1):N] = mu.2
-      }
-    }
+    mu.2 = (x.2 - m) - diff_p
+    mu[k, (opt_idx[k]+1):N] = mu.2 + m
 
     if (use_scale){
       fit.vals[k, ] = mu[k, ]*(attributes(res_mean)$'scaled:scale'[k])
@@ -351,7 +330,7 @@ boot_k_mv = function(k, results, plot_results, methodname){
 
   if (methodname=='step'){
     samp = bootstrap_sample_step.mv(results, plot_results, seed = k)
-    res = t2cd_step.mv(samp, use_arf = F)
+    res = t2cd_step.mv(samp)
   }else if (methodname=='sigmoid'){
     samp = bootstrap_sample_sigmoid.mv(results, plot_results, seed = k)
     res = t2cd_sigmoid.mv(samp)
