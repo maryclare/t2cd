@@ -3,25 +3,8 @@
 # option to initialize tau at multiple indices
 # loglikelihood, penalty to enforce tau within tau.range
 #' @export
-negloglik_partial_pen_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.2,
-                                                ll.1.mat, C, alpha0, alpha1, use_t = FALSE){
-  dfrac = param
-
-  neglogL = 0
-  for (k in 1:p) {
-    neglogL = neglogL -
-      loglik_res_sigmoid(param = c(alpha0[k], alpha1[k], dfrac),
-                         tim_cp = tim_cp[k, ], tau.idx = tau.idx,
-                         x.2 = x.2[k, ], ll.1 = ll.1.mat[k, ],
-                         pen = TRUE, C = C, use_t = use_t)
-  }
-
-  return(neglogL)
-}
-
-#' @export
 # loglikelihood
-loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.2,
+loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x,
                                  ll.1.mat, alpha0, alpha1, C = NULL, pen = FALSE, use_t = FALSE){
   dfrac = param[1]
   if (use_t) {
@@ -37,10 +20,10 @@ loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x.2,
       parev <- c(parev, m[k], sd[k], df[k])
     }
     logL = logL +
-      loglik_res_sigmoid(param = parev,
-                         tim_cp = tim_cp[k, ], tau.idx = tau.idx,
-                         x.2 = x.2[k, ], ll.1 = ll.1.mat[k, ],
-                         pen = pen, use_t = use_t, C = C)
+      loglik_res(param = parev, sigmoid = TRUE,
+                 tim_cp = tim_cp[k, ], tau.idx = tau.idx,
+                 x = x[k, ], ll.1 = ll.1.mat[k, ],
+                 pen = pen, use_t = use_t, C = C)
   }
 
   return(logL)
@@ -105,13 +88,12 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
     init.d[k] = res_k$d
   }
 
-  x.2 = res_mean
-  init.d.2 = init.d
+  x = res_mean
 
   alpha0 = init.param[,1]
   alpha1 = init.param[,2]
 
-  start <- c(mean(init.d.2))
+  start <- c(mean(init.d))
   lower <- -Inf
   upper <- Inf
   if (use_t) {
@@ -123,30 +105,30 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
   optim_params = optim(par = start,
                        fn = loglik_res_sigmoid_mv, method = "L-BFGS-B",
                        lower = lower, upper = upper,
-                       tim_cp = tim_cp, tau.idx = tau.idx, N = N, p = p, x.2 = x.2,
+                       tim_cp = tim_cp, tau.idx = tau.idx, N = N, p = p, x = x,
                        ll.1.mat = ll.1.mat, C = C, alpha0 = alpha0, alpha1 = alpha1, pen = TRUE,
                        control = list("fnscale" = -1), use_t = use_t)
   # weights
-  wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
-  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-             wt_cp,
-             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
-                        N-tau.idx[length(tau.idx)]), p, byrow = F))
+  wt <- matrix(nrow = p, ncol = N)
+  for (k in 1:p) {
+    wt[k, ] <- get.wt(alpha = c(alpha0[k], alpha1[k]), tim_cp = tim_cp[k, ],
+                      tau.idx = tau.idx, N = N)
+  }
 
   opt_param = c(alpha0, alpha1, optim_params$par)
   opt_logL = loglik_res_sigmoid_mv(optim_params$par,
                                    tim_cp = tim_cp, tau.idx = tau.idx, N = N,
-                                   p = p, x.2 = x.2,
+                                   p = p, x = x,
                                    ll.1.mat = ll.1.mat, alpha0 = alpha0, alpha1 = alpha1, use_t = use_t)
   opt_d = optim_params$par[1]
   univ_d = init.param[,3]
 
-  df <- sd <- m <- rep(NA, nrow(x.2))
+  df <- sd <- m <- rep(NA, nrow(x))
 
   for (k in 1:length(m)) {
     if (!use_t) {
-      m[k] <- get.m(x.2 = x.2[k, ], dfrac = opt_d, wt = wt[k, ])
-      sd[k] <- get.sd(x.2 = x.2[k, ], dfrac = opt_d, mean = m[k], wt = wt[, ])
+      m[k] <- get.m(x.2 = x[k, ], dfrac = opt_d, wt = wt[k, ])
+      sd[k] <- get.sd(x.2 = x[k, ], dfrac = opt_d, mean = m[k], wt = wt[, ])
     } else {
       m[k] <- optim_params$par[1 + k]
       sd[k] <- abs(optim_params$par[1 + p + k])
@@ -199,14 +181,11 @@ plot_t2cd_sigmoid_mv = function(results, tau.range = c(10, 50), deg = 3,
   m = opt_param[2*p + 1:p]
 
   # weights
-  wt_cp <- matrix(nrow = nrow(tim_cp), ncol = ncol(tim_cp))
+  wt <- matrix(nrow = p, ncol = N)
   for (k in 1:p) {
-    wt_cp[k, ] = sigmoid(alpha0[k]+alpha1[k]*tim_cp[k, ])
+    wt[k, ] <- get.wt(alpha = c(alpha0[k], alpha1[k]), tim_cp = tim_cp[k, ],
+                      tau.idx = tau.idx, N = N)
   }
-  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-             wt_cp,
-             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
-                        N-tau.idx[length(tau.idx)]), p, byrow = F))
 
   # update variables if using original or first difference
   fit.vals <- mu.2 <- diff_p <- matrix(nrow = nrow(res), ncol = ncol(res))

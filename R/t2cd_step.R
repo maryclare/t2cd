@@ -64,13 +64,12 @@ ldnorm_mc <- function(x, mean, sd) {
   -log(2*pi*sd^2)/2 - (x - mean)^2/(2*sd^2)
 }
 #' @export
-fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, tau_j, N,
-                        use_t = FALSE, start.2 = NULL, prof = TRUE){
+fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, idx, N,
+                        use_t = FALSE, start.2 = NULL, prof = TRUE,
+                        ll.1 = ll.1){
 
-  fit1 = refitWLS(t.1, x.1, deg = deg, seqby = seqby, resd.seqby = resd.seqby)
-  resd1.1 = x.1 - fit1$fit.vals
-  var.resd1.1 = fit1$var.resd
-  ll.1 = sum(dnorm(resd1.1, log = TRUE, sd = sqrt(var.resd1.1)))
+  x <- c(x.1, x.2)
+  ll.1 <- c(ll.1, rep(0, length(x) - length(ll.1)))
 
   if (!use_t | (use_t & is.null(start.2))) {
 
@@ -87,8 +86,9 @@ fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, tau_j, N,
     }
 
     optim.2 = optim(par = start.norm,
-                    fn = loglik_res_step, method = "L-BFGS-B",
-                    x.2 = x.2,
+                    fn = loglik_res, method = "L-BFGS-B",
+                    x = x, sigmoid = FALSE, ll.1 = ll.1,
+                    use_t = FALSE, idx = idx,
                     control = list("fnscale" = -1))
     fit_d = optim.2$par[1]
     if (length(optim.2$par) == 1) {
@@ -101,7 +101,7 @@ fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, tau_j, N,
       fit_m <- optim.2$par[2]
       fit_sd <- abs(optim.2$par[3])
     }
-    ll.2 = optim.2$value
+    ll = optim.2$value
     fit_df <- NA
   }
 
@@ -113,16 +113,18 @@ fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, tau_j, N,
       start.t <- c(start.2$d, start.2$m, start.2$sd, start.2$df)
     }
 
-    opt <- optim(start.t, loglik_t_res_step, x.2 = x.2,
+    opt <- optim(start.t, loglik_res, x = x,
                  lower = c(-Inf, -Inf, -Inf, 2 + 10^(-14)), upper = c(Inf, Inf, Inf, 300),
+                 sigmoid = FALSE, ll.1 = ll.1,
+                 use_t = TRUE, idx = idx,
                  control = list("fnscale" = -1), method = "L-BFGS-B")
-    ll.2 = opt$value
+    ll = opt$value
     fit_d <- opt$par[1]
     fit_m <- opt$par[2]
     fit_sd <- abs(opt$par[3])
     fit_df <- opt$par[4]
   }
-  return(list(fit_M=ll.1 + ll.2,fit_d=fit_d,fit_m=fit_m, fit_sd=fit_sd, fit_df = fit_df))
+  return(list(fit_M=ll,fit_d=fit_d,fit_m=fit_m, fit_sd=fit_sd, fit_df = fit_df))
 }
 
 # fit first regime with model that accounts to heteroscedastic noise
@@ -135,7 +137,8 @@ fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, tau_j, N,
 #' @export
 t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                      seqby = 1, resd.seqby = 5,
-                     use_scale = TRUE, use_t = FALSE, prof = TRUE){
+                     use_scale = TRUE, use_t = FALSE, prof = TRUE,
+                     ret.ll.1 = FALSE){
   # dat: input time series
   # t.max: cutoff for time considered
   # tau.range candidate change point range
@@ -144,7 +147,8 @@ t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   # use_scale: if true, scale time series
   res1 = search_dtau_step(dat, t.max, tau.range, deg,
                           seqby = seqby, resd.seqby = resd.seqby,
-                          use_scale = use_scale, use_t = use_t, prof = prof)
+                          use_scale = use_scale, use_t = use_t, prof = prof,
+                          ret.ll.1 = ret.ll.1)
   return(res1)
 }
 
@@ -155,7 +159,8 @@ t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 #' @export
 search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                             seqby = 1, resd.seqby = 5,
-                            use_scale = TRUE, use_t = FALSE, prof = TRUE){
+                            use_scale = TRUE, use_t = FALSE, prof = TRUE,
+                            ret.ll.1 = FALSE){
   # select data below t.max
   if (is.na(t.max)){
     t.max = max(dat$tim, na.rm = T)
@@ -180,14 +185,14 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   foreach.tau <- vector("list", length = length(tau.idx))
   for (j in 1:length(tau.idx)) {
     cat("j=", j, "\n")
-    tau_j = tau.idx[j]
+    idx = tau.idx[j]
 
     # optimize for polynomial component
-    x.1 = res_mean[1:tau_j]
-    t.1 = tim[1:tau_j]
+    x.1 = res_mean[1:idx]
+    t.1 = tim[1:idx]
     n.1 = length(x.1)
     # optimize for ARFIMA
-    x.2 = res_mean[(tau_j+1):N]
+    x.2 = res_mean[(idx+1):N]
 
     if (j == 1) {
       start.2 <- NULL
@@ -197,10 +202,16 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                       "sd" = foreach.tau[[j-1]]$sd,
                       "df" = foreach.tau[[j-1]]$df)
     }
+
+    fit1 = refitWLS(t.1, x.1, deg = deg, seqby = seqby, resd.seqby = resd.seqby)
+    resd1.1 = x.1 - fit1$fit.vals
+    var.resd1.1 = fit1$var.resd
+    ll.1 = dnorm(resd1.1, log = TRUE, sd = sqrt(var.resd1.1))
+
     fit_res = tryCatch(fit_res_step(t.1 = t.1,  x.1 = x.1, x.2 = x.2, deg = deg,
-                                    seqby = seqby, resd.seqby = resd.seqby, tau_j = tau_j,
+                                    seqby = seqby, resd.seqby = resd.seqby, idx = idx,
                                     N = N, use_t = use_t,
-                                    start.2 = start.2, prof = prof),
+                                    start.2 = start.2, prof = prof, ll.1 = ll.1),
                        error = function(e) {return(NA)})
     if ((!use_t & any(is.na(fit_res[1:4]))) | (use_t & any(is.na(fit_res)))) {
       foreach.tau[[j]] <- list("M" = -Inf, "d" = NA, "m" = NA, "df" = NA, "sd" = NA)
@@ -225,9 +236,14 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   max.sd = sd[max.idx]
   max.df = df[max.idx]
 
-  return(list(M_df = M_df, res = res, tim = tim, tau.idx = tau.idx,
-              tau = max.tau, d = max.d, m = max.m, sd = max.sd, df = max.df,
-              idx = tau.idx[max.idx], logL = M[max.idx]))
+  retlist <- list(M_df = M_df, res = res, tim = tim, tau.idx = tau.idx,
+                  tau = max.tau, d = max.d, m = max.m, sd = max.sd, df = max.df,
+                  idx = tau.idx[max.idx], logL = M[max.idx])
+  if (ret.ll.1) {
+    retlist[["ll.1"]] <- ll.1
+  }
+
+  return(retlist)
 }
 # plot sequences and fitted lines
 #' @export

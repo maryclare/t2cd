@@ -1,42 +1,74 @@
 # loglikelihood, penalty to enforce tau within tau.range
 # loglikelihood
 #' @export
-loglik_res_sigmoid = function(param, tim_cp, tau.idx, x.2, ll.1,
-                              pen = FALSE, C = NULL, use_t = FALSE){
-  alpha0 = param[1]
-  alpha1 = param[2]
-
-  # weights
+loglik_res_sigmoid_alpha = function(param, tim_cp, tau.idx, x, ll.1,
+                                    pen = FALSE, C = NULL, use_t = FALSE, rest) {
+  loglik_res_sigmoid(param = c(param, rest), tim_cp = tim_cp, tau.idx = tau.idx,
+                     x = x, ll.1 = ll.1, pen = pen, C = C, use_t = use_t,
+                     sigmoid = TRUE)
+}
+#' @export
+loglik_res_sigmoid_rest = function(param, tim_cp, tau.idx, x, ll.1,
+                                    pen = FALSE, C = NULL, use_t = FALSE, alpha) {
+  loglik_res_sigmoid(param = c(alpha, param), tim_cp = tim_cp, tau.idx = tau.idx,
+                     x = x, ll.1 = ll.1, pen = pen, C = C, use_t = use_t,
+                     sigmoid = TRUE)
+}
+#' @export
+get.wt <- function(alpha, tim_cp, tau.idx, N) {
+  alpha0 <- alpha[1]
+  alpha1 <- alpha[2]
   wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
   # MCG Change: Updated this to make sure that the last weights aren't equal to 0
   wt = c(rep(wt_cp[1], tau.idx[1]-1),
          wt_cp,
          rep(ifelse(wt_cp[length(wt_cp)] != 0, wt_cp[length(wt_cp)], 1),
-             length(x.2)-tau.idx[length(tau.idx)]))
+             N-tau.idx[length(tau.idx)]))
+  return(wt)
+}
 
-  dfrac = param[3]
+#' @export
+loglik_res = function(param, sigmoid = TRUE,
+                      tim_cp = NULL, tau.idx = NULL,
+                      x, ll.1,
+                      pen = FALSE, C = NULL, use_t = FALSE,
+                      idx = NULL) {
+
+  if (sigmoid) {
+    alpha0 = param[1]
+    alpha1 = param[2]
+
+    # weights
+    wt <- get.wt(alpha = c(alpha0, alpha1), tim_cp = tim_cp, tau.idx = tau.idx,
+                 N = length(x))
+    k <- 2
+  } else {
+    wt <- c(rep(0, idx), rep(1, (length(x) - idx)))
+    k <- 0
+  }
+  dfrac = param[k + 1]
 
   if (use_t) {
     df = param[length(param)]
   }
 
-  if ((length(param) == 3 & !use_t)) {
-    m <- get.m(x.2 = x.2, dfrac = dfrac, wt = wt)
-    sd <- get.sd(x.2 = x.2, dfrac = dfrac, mean = m, wt = wt)
-  } else if (length(param) == 4 & !use_t) {
-    m <- param[4]
-    sd <- get.sd(x.2 = x.2, dfrac = dfrac, mean = m, wt = wt)
-  } else if ((length(param) == 5) & !use_t | use_t) {
-    m <- param[4]
-    sd <- param[5]
+  if (((length(param) - k) == 1 & !use_t)) {
+    m <- get.m(x.2 = x, dfrac = dfrac, wt = wt)
+    sd <- get.sd(x.2 = x, dfrac = dfrac, mean = m, wt = wt)
+  } else if ((length(param) - k) == 2 & !use_t) {
+    m <- param[k + 2]
+    sd <- get.sd(x.2 = x, dfrac = dfrac, mean = m, wt = wt)
+  } else if (((length(param) - k) == 3) & !use_t | use_t) {
+    m <- param[k + 2]
+    sd <- param[k + 3]
   }
 
 
   logL = sum((1-wt)*ll.1) +
     ifelse(!use_t,
-           loglik_res_step(par = c(dfrac, m, sd), x.2 = x.2, wt = wt),
-           loglik_t_res_step(par = c(dfrac, m, sd, df), x.2 = x.2, wt = wt)) +
-    ifelse(pen, C*sum(wt_cp[length(wt_cp)] - wt_cp[1]), 0)
+           loglik_res_step(par = c(dfrac, m, sd), x.2 = x, wt = wt),
+           loglik_t_res_step(par = c(dfrac, m, sd, df), x.2 = x, wt = wt)) +
+    ifelse(pen, C*sum(wt[length(wt)] - wt[1]), 0)
 
   return(logL)
 }
@@ -118,7 +150,7 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   var.resd1 = fit1$var.resd
   ll.1 = dnorm(resd1, log = TRUE, sd = sqrt(var.resd1))
 
-  x.2 = res_mean
+  x = res_mean
   lastN = N
 
   opt_logL = -Inf
@@ -128,24 +160,25 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
     lower <- rep(-Inf, length(start))
     upper <- rep(Inf, length(start))
     if (!prof & !use_t) {
-      start <- c(start, mean(x.2[tau_i.idx:lastN]), sd(x.2[tau_i.idx:lastN]))
+      start <- c(start, mean(x[tau_i.idx:lastN]), sd(x[tau_i.idx:lastN]))
       lower <- c(lower, rep(-Inf, 2))
       upper <- c(upper, rep(Inf, 2))
     }
     if (use_t) {
-      start <- c(start, mean(x.2[tau_i.idx:lastN]), sd(x.2[tau_i.idx:lastN]), 3)
+      start <- c(start, mean(x[tau_i.idx:lastN]), sd(x[tau_i.idx:lastN]), 3)
       lower <- c(lower, -Inf, -Inf, 2 + 10^(-14))
       upper <- c(upper, Inf, Inf, 300)
     }
     optim_i = optim(par = start,
-                    fn = loglik_res_sigmoid, method = "L-BFGS-B",
-                    tim_cp = tim_cp, tau.idx = tau.idx, x.2 = x.2,
+                    fn = loglik_res, method = "L-BFGS-B",
+                    tim_cp = tim_cp, tau.idx = tau.idx, x = x,
                     ll.1 = ll.1, pen = TRUE, C = C,
                     control = list("fnscale" = -1), use_t = use_t,
-                    lower = lower, upper = upper)
-    logL_i = loglik_res_sigmoid(optim_i$par,
-                                tim_cp = tim_cp, tau.idx = tau.idx,
-                                x.2 = x.2, ll.1 = ll.1, use_t = use_t)
+                    lower = lower, upper = upper, sigmoid = TRUE)
+    logL_i = loglik_res(optim_i$par,
+                        tim_cp = tim_cp, tau.idx = tau.idx,
+                        x = x, ll.1 = ll.1, use_t = use_t,
+                        sigmoid = TRUE)
     if (logL_i > opt_logL){
       opt_logL = logL_i
       optim_params = optim_i
@@ -159,12 +192,9 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
 
 
   # weights
-  wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
-  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
-  wt = c(rep(wt_cp[1], tau.idx[1]-1),
-         wt_cp,
-         rep(ifelse(wt_cp[length(wt_cp)] != 0, wt_cp[length(wt_cp)], 1),
-             length(x.2)-tau.idx[length(tau.idx)]))
+  wt <- get.wt(alpha = c(alpha0, alpha1), tim_cp = tim_cp, tau.idx = tau.idx,
+               N = length(x))
+
   opt_tau.idx = which(wt>=0.5, arr.ind = TRUE)[1]-1
   opt_tau = tim[opt_tau.idx[1]]
 
@@ -182,8 +212,8 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
     opt_df <- opt_param[6]
   } else {
     if (prof) {
-      opt_m <- get.m(x.2 = x.2, dfrac = opt_d, wt = wt)
-      opt_sd <- get.sd(x.2 = x.2, dfrac = opt_d, mean = opt_m, wt = wt)
+      opt_m <- get.m(x.2 = x, dfrac = opt_d, wt = wt)
+      opt_sd <- get.sd(x.2 = x, dfrac = opt_d, mean = opt_m, wt = wt)
     } else if (!prof) {
       opt_m <- opt_param[4]
       opt_sd <- abs(opt_param[5])
@@ -231,17 +261,13 @@ plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
   m = opt_param[3]
 
   # weights
-  wt_cp = sigmoid(alpha0+alpha1*tim_cp) # 0 to 1
-  # MCG Change: Updated this to make sure that the last weights aren't equal to 0
-  wt = cbind(matrix(rep(wt_cp[,1], tau.idx[1]-1), p, byrow = F),
-             wt_cp,
-             matrix(rep(ifelse(wt_cp[,ncol(wt_cp)] != 0, wt_cp[,ncol(wt_cp)], 1),
-                        N-tau.idx[length(tau.idx)]), p, byrow = F))
+  wt <- get.wt(alpha = c(alpha0, alpha1), tim_cp = tim_cp, tau.idx = tau.idx,
+               N = N)
 
   # update variables if using original or first difference
-  x.2 = res_mean
+  x = res_mean
   d = opt_d
-  diff_p = t(diffseries_keepmean(t(wt*(x.2-m)), d))
+  diff_p = t(diffseries_keepmean(t(wt*(x-m)), d))
 
   mu.2 = wt*(x.2-m) - diff_p
   fit.vals = (mu.2 + wt*m)*attributes(res_mean)$'scaled:scale' +
