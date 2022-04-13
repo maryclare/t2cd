@@ -86,7 +86,7 @@ loglik_res_step_mv = function(param, x, idx, ll.1,
                               use_t = FALSE){
   dfrac = param[1]
   if (use_t) {
-    p <- nrow(x.2)
+    p <- nrow(x)
     mean <- param[1 + 1:p]
     sd <- param[1 + p + 1:p]
     df <- param[1 + 2*p + 1:p]
@@ -99,7 +99,7 @@ loglik_res_step_mv = function(param, x, idx, ll.1,
     } else {
       par <- c(dfrac, mean[k], sd[k], df[k])
     }
-    ll <- loglik_res(par = dfrac, x = x[k, ],
+    ll <- loglik_res(par = par, x = x[k, ],
                      sigmoid = FALSE, ll.1 = ll.1[k, ],
                      use_t = use_t, idx = idx[k])
 
