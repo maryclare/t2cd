@@ -1,16 +1,22 @@
 # loglikelihood, penalty to enforce tau within tau.range
 # loglikelihood
 #' @export
-loglik_res_sigmoid_alpha = function(param, tim_cp, tau.idx, x, ll.1,
-                                    pen = FALSE, C = NULL, use_t = FALSE, rest) {
-  loglik_res_sigmoid(param = c(param, rest), tim_cp = tim_cp, tau.idx = tau.idx,
+loglik_res_sigmoid_alpha = function(param,
+                                    tim_cp = NULL, tau.idx = NULL,
+                                    x, ll.1,
+                                    pen = FALSE, C = NULL, use_t = FALSE,
+                                    rest) {
+  loglik_res(param = c(param, rest), tim_cp = tim_cp, tau.idx = tau.idx,
                      x = x, ll.1 = ll.1, pen = pen, C = C, use_t = use_t,
                      sigmoid = TRUE)
 }
 #' @export
-loglik_res_sigmoid_rest = function(param, tim_cp, tau.idx, x, ll.1,
-                                    pen = FALSE, C = NULL, use_t = FALSE, alpha) {
-  loglik_res_sigmoid(param = c(alpha, param), tim_cp = tim_cp, tau.idx = tau.idx,
+loglik_res_sigmoid_rest = function(param,
+                                   tim_cp = NULL, tau.idx = NULL,
+                                   x, ll.1,
+                                   pen = FALSE, C = NULL, use_t = FALSE,
+                                   alpha) {
+  loglik_res(param = c(alpha, param), tim_cp = tim_cp, tau.idx = tau.idx,
                      x = x, ll.1 = ll.1, pen = pen, C = C, use_t = use_t,
                      sigmoid = TRUE)
 }
@@ -80,7 +86,7 @@ loglik_res = function(param, sigmoid = TRUE,
 t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
                         init.tau = c(15, 30, 45), deg = 3, C = 1000,
                         seqby = 1, resd.seqby = 5, use_scale = TRUE,
-                        use_t = FALSE, prof = TRUE){
+                        use_t = FALSE, prof = TRUE, several.init = TRUE){
   # dat: input time series
   # t.max: cutoff for time considered
   # tau.range candidate change point range
@@ -91,14 +97,14 @@ t2cd_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   # use_scale: if true, scale time series
   res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C,
                              seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale,
-                             use_t = use_t, prof = prof)
+                             use_t = use_t, prof = prof, several.init = several.init)
   # increase C if change point not in candidate range
   multiplier = 2
   while (is.na(res1$tau)){
     C_new = multiplier*C
     res1 = search_dtau_sigmoid(dat, t.max, tau.range, init.tau, deg, C_new,
                                seqby = seqby, resd.seqby = resd.seqby, use_scale = use_scale,
-                               use_t = use_t, prof = prof)
+                               use_t = use_t, prof = prof, several.init = several.init)
     multiplier = multiplier + 1
   }
   return(res1)
@@ -120,7 +126,7 @@ softmax = function(a,b){
 search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
                                init.tau = c(15, 30, 45), deg = 3, C = 1000,
                                seqby = 1, resd.seqby = 5, use_scale = T,
-                               use_t = FALSE, prof = TRUE){
+                               use_t = FALSE, prof = TRUE, several.init = T){
   # select data below t.max
   if (is.na(t.max)){
     t.max = min(apply(dat$tim, 1, max, na.rm = T))
@@ -154,6 +160,7 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
   lastN = N
 
   opt_logL = -Inf
+  if (several.init) {
   for (tau_i in init.tau){
     tau_i.idx = which.min(apply(tim <= tau_i, 2, all) == T)
     start <- c(-tau_i, 1, 0)
@@ -184,8 +191,86 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
       optim_params = optim_i
     }
   }
+    opt_param = optim_params$par
+  } else {
 
-  opt_param = optim_params$par
+
+    tau_i = 50
+    tau_i.idx = which.min(apply(tim <= tau_i, 2, all) == T)
+
+    start <- c(0)
+    lower <- rep(-Inf, length(start))
+    upper <- rep(Inf, length(start))
+    if (!prof & !use_t) {
+      start <- c(start, mean(x[tau_i.idx:lastN]), sd(x[tau_i.idx:lastN]))
+      lower <- c(lower, rep(-Inf, 2))
+      upper <- c(upper, rep(Inf, 2))
+    }
+    if (use_t) {
+      start <- c(start, mean(x[tau_i.idx:lastN]), sd(x[tau_i.idx:lastN]), 3)
+      lower <- c(lower, -Inf, -Inf, 2 + 10^(-14))
+      upper <- c(upper, Inf, Inf, 300)
+    }
+
+    initial <- optim(par = start,
+                     fn = loglik_res, method = "L-BFGS-B",
+                     x = x, idx = tau_i.idx,
+                     ll.1 = ll.1,
+                     control = list("fnscale" = -1), use_t = use_t,
+                     lower = lower, upper = upper, sigmoid = FALSE)
+
+
+    start <- c(-tau_i, 1)
+    lower.alpha <- c(-Inf, -Inf)
+    upper.alpha <- c(Inf, Inf)
+
+    optim_alpha = optim(par = start,
+                        fn = loglik_res_sigmoid_alpha, method = "L-BFGS-B",
+                        tim_cp = tim_cp, tau.idx = tau.idx, x = x,
+                    ll.1 = ll.1, pen = TRUE, C = C,
+                    control = list("fnscale" = -1), use_t = use_t,
+                    lower = lower.alpha, upper = upper.alpha, rest = initial$par)
+
+    optim_rest = optim(par = initial$par,
+                        fn = loglik_res_sigmoid_rest, method = "L-BFGS-B",
+                        tim_cp = tim_cp, tau.idx = tau.idx, x = x,
+                        ll.1 = ll.1, pen = TRUE, C = C,
+                        control = list("fnscale" = -1), use_t = use_t,
+                        lower = lower, upper = upper, alpha = optim_alpha$par)
+
+    logL_i = loglik_res(c(optim_alpha$par, optim_rest$par),
+                        tim_cp = tim_cp, tau.idx = tau.idx,
+                        x = x, ll.1 = ll.1, use_t = use_t,
+                        sigmoid = TRUE)
+    while (abs(logL_i - opt_logL) > 10^(-3)) {
+
+      opt_logL <- logL_i
+
+      optim_alpha = optim(par = optim_alpha$par,
+                          fn = loglik_res_sigmoid_alpha, method = "L-BFGS-B",
+                          tim_cp = tim_cp, tau.idx = tau.idx, x = x,
+                          ll.1 = ll.1, pen = TRUE, C = C,
+                          control = list("fnscale" = -1), use_t = use_t,
+                          lower = lower.alpha, upper = upper.alpha, rest = optim_rest$par)
+
+      optim_rest = optim(par = optim_rest$par,
+                         fn = loglik_res_sigmoid_rest, method = "L-BFGS-B",
+                         tim_cp = tim_cp, tau.idx = tau.idx, x = x,
+                         ll.1 = ll.1, pen = TRUE, C = C,
+                         control = list("fnscale" = -1), use_t = use_t,
+                         lower = lower, upper = upper, alpha = optim_alpha$par)
+
+      logL_i = loglik_res(c(optim_alpha$par, optim_rest$par),
+                          tim_cp = tim_cp, tau.idx = tau.idx,
+                          x = x, ll.1 = ll.1, use_t = use_t,
+                          sigmoid = TRUE)
+
+
+
+    }
+    opt_param = c(optim_alpha$par, optim_rest$par)
+  }
+
   alpha0 = opt_param[1]
   alpha1 = opt_param[2]
   opt_d = opt_param[3]
