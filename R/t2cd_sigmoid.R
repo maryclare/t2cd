@@ -154,7 +154,7 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
                   seqby = seqby, resd.seqby = resd.seqby)
   resd1 = res_mean - fit1$fit.vals
   var.resd1 = fit1$var.resd
-  ll.1 = dnorm(resd1, log = TRUE, sd = sqrt(var.resd1))
+  ll.1.i = dnorm(resd1, log = TRUE, sd = sqrt(var.resd1))
 
   x = res_mean
   lastN = N
@@ -179,16 +179,19 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
     optim_i = optim(par = start,
                     fn = loglik_res, method = "L-BFGS-B",
                     tim_cp = tim_cp, tau.idx = tau.idx, x = x,
-                    ll.1 = ll.1, pen = TRUE, C = C,
+                    ll.1 = ll.1.i, pen = TRUE, C = C,
                     control = list("fnscale" = -1), use_t = use_t,
                     lower = lower, upper = upper, sigmoid = TRUE)
     logL_i = loglik_res(optim_i$par,
                         tim_cp = tim_cp, tau.idx = tau.idx,
-                        x = x, ll.1 = ll.1, use_t = use_t,
+                        x = x, ll.1 = ll.1.i, use_t = use_t,
                         sigmoid = TRUE)
     if (logL_i > opt_logL){
       opt_logL = logL_i
       optim_params = optim_i
+      fit.vals <- fit1$fit.vals
+      var.resd <- var.resd1
+      ll.1 = ll.1.i
     }
   }
     opt_param = optim_params$par
@@ -310,27 +313,26 @@ search_dtau_sigmoid = function(dat, t.max = 72, tau.range = c(10, 50),
               sd = opt_sd, df = opt_df,
               d = opt_d, tau = opt_tau, idx = opt_tau.idx,
               tau.range1 = opt_taurange1, tau.range2 = opt_taurange2,
-              param = opt_param, logL = opt_logL))
+              param = opt_param, logL = opt_logL,
+              fit.vals = fit.vals, var.resd = var.resd,
+              ll.1 = ll.1))
 }
 
 # plot sequences and fitted lines
 #' @export
-plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
-                             seqby = 1, resd.seqby = 5, return_plot = TRUE){
+plot_t2cd_sigmoid = function(results, tau.range = c(10, 50),
+                             return_plot = TRUE){
   res = results$res
   tim = results$tim
   tau.idx = results$tau.idx
   res_mean = t(scale(t(res), center = F)) # scaling
   N = ncol(res_mean)
-  p = nrow(res_mean)
 
   fit1 = var.resd1 = matrix(nrow = 0, ncol = N)
-  for (k in 1:p){
-    fitwls = refitWLS(tim[k,], res_mean[k,], deg = deg,
-                      seqby = seqby, resd.seqby = resd.seqby)
-    fit1 = rbind(fit1, fitwls$fit.vals)
-    var.resd1 = rbind(var.resd1, fitwls$var.resd)
-  }
+  fitwls = refitWLS(tim, res_mean, deg = deg,
+                    seqby = seqby, resd.seqby = resd.seqby)
+  fit1 = rbind(fit1, fitwls$fit.vals)
+  var.resd1 = rbind(var.resd1, fitwls$var.resd)
 
   # points in change range
   tim_cp = matrix(tim[,tau.idx], nrow = nrow(tim))
@@ -343,65 +345,42 @@ plot_t2cd_sigmoid = function(results, tau.range = c(10, 50), deg = 3,
   # fitted values
   alpha0 = opt_param[1]
   alpha1 = opt_param[2]
-  m = opt_param[3]
 
   # weights
   wt <- get.wt(alpha = c(alpha0, alpha1), tim_cp = tim_cp, tau.idx = tau.idx,
                N = N)
-
-  # update variables if using original or first difference
   x = res_mean
-  d = opt_d
-  diff_p = t(diffseries_keepmean(t(wt*(x-m)), d))
+  m <- results$m
 
-  mu.2 = wt*(x.2-m) - diff_p
+  diff_p = diffseries_keepmean(wt*(x-m), opt_d)
+
+  mu.2 = wt*(x-m) - c(diff_p)
   fit.vals = (mu.2 + wt*m)*attributes(res_mean)$'scaled:scale' +
   (1-wt)*fit1*attributes(res_mean)$'scaled:scale'
 
   # plotting
   if (return_plot){
-    plot(tim[1,], res[1,], ylim = c(min(c(res, fit.vals)), max(c(res, fit.vals))), type = 'l',
+    plot(tim, res, ylim = c(min(c(res, fit.vals)), max(c(res, fit.vals))), type = 'l',
          main = paste('Values fitted with d: ', round(opt_d,3), ' tau: ', round(mean(opt_tau),3)),
          xlab = 'Time (hour)', ylab = 'Resistance (ohm)')
-    if (p > 1){
-      for (k in 2:p){
-        lines(tim[k,], res[k,])
-      }
-    }
+
     if (is.na(opt_tau[1])){
-      lines(tim[1,], fit.vals[1,], col = "blue", lwd = 1)
+      lines(tim, fit.vals, col = "blue", lwd = 1)
     }else{
-      opt_tau.idx = which(tim[1,] == opt_tau[1])
-      lines(tim[1,1:opt_tau.idx], fit.vals[1,1:opt_tau.idx], col = "blue", lwd = 1)
-      lines(tim[1,(opt_tau.idx):ncol(fit.vals)], fit.vals[1,(opt_tau.idx):ncol(fit.vals)], col = "green", lwd = 1)
+      opt_tau.idx = which(tim == opt_tau[1])
+      lines(tim[1:opt_tau.idx], fit.vals[1:opt_tau.idx], col = "blue", lwd = 1)
+      lines(tim[(opt_tau.idx):ncol(fit.vals)], fit.vals[(opt_tau.idx):ncol(fit.vals)], col = "green", lwd = 1)
       abline(v = opt_tau[1], lty = 2, col = "red")
-    }
-    if (p > 1){
-      for (k in 2:p){
-        if (is.na(opt_tau[k])){
-          lines(tim[k,], fit.vals[k,], col = "blue", lwd = 1)
-        }else{
-          opt_tau.idx = which(tim[k,] == opt_tau[k])
-          lines(tim[k,1:opt_tau.idx], fit.vals[k,1:opt_tau.idx], col = "blue", lwd = 1)
-          lines(tim[k,(opt_tau.idx):ncol(fit.vals)], fit.vals[k,(opt_tau.idx):ncol(fit.vals)], col = "green", lwd = 1)
-          abline(v = opt_tau[k], lty = 2, col = "red")
-        }
-      }
     }
     abline(v = tau.range, lty = 1, col = "red")
   }
 
-  if (p ==1){
-    opt_tau.idx = results$idx
-    return(list(fit.vals = fit.vals,
-                fit.vals1 = fit1, fit.vals2 = mu.2,
-                var.resd1 = var.resd1,
-                wt = wt, scaling = attributes(res_mean)$'scaled:scale'))
-  }else{
-    return(list(fit.vals = fit.vals,
-                var.resd1 = var.resd1*attributes(res_mean)$'scaled:scale'^2,
-                wt = wt, scaling = attributes(res_mean)$'scaled:scale'))
-  }
+  opt_tau.idx = results$idx
+  return(list(fit.vals = fit.vals,
+              fit.vals1 = fit1, fit.vals2 = mu.2,
+              var.resd1 = var.resd1,
+              wt = wt, scaling = attributes(res_mean)$'scaled:scale'))
+
 }
 
 # parametric bootstrap using outputs from t2cd_step and plot.t2cd_step
@@ -422,10 +401,9 @@ bootstrap_sample_sigmoid = function(results, plot_results, seed = 0){
   opt_d = results$d
   m = results$m
   wt = plot_results$wt
-  x.2 = t(scale(t(res), center = F)) # scaling
-  diff_p = t(diffseries_keepmean(t(wt*(x.2-m)), opt_d))
-  sd.resd2 = sqrt(rowSums(wt*diff_p^2)/rowSums(wt))
-  sim = sim.fi(N, opt_d, sd.resd2, mu = m)
+  sd = results$sd
+  df <- results$df
+  sim = sim_fi(N, opt_d, mu = m, sig = sd, df = df)
   seq_fi = sim$s
 
   samp = c((1-wt)*(fit.vals1 + noise1) + wt*(seq_fi)*plot_results$scaling)

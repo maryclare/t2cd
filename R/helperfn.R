@@ -130,9 +130,13 @@ tr_fi <- function(s, eff.d, mu, dn_coeff = NULL) {
 
 # simulates univariate FI series
 #' @export
-sim_fi = function(N, eff.d, sig=1, mu = 0){
+sim_fi = function(N, eff.d, sig=1, mu = 0, df = NA){
 
-  noise = rnorm(N, sd = sig) # ordered from 1 to N
+  if (is.na(df)) {
+    noise = rnorm(N, sd = sig) # ordered from 1 to N
+  } else {
+    noise = sig*sqrt((df - 2)/df)*rt(N, df = df)
+  }
   dn_coeff = sapply(1:N, function(k){return(choose(eff.d, k)*(-1)**(k+1))})
   trend = c(mu)
   s = c(trend[length(trend)] + noise[1])

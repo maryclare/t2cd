@@ -66,11 +66,12 @@ ldnorm_mc <- function(x, mean, sd) {
 #' @export
 fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, idx, N,
                         use_t = FALSE, start.2 = NULL, prof = TRUE,
-                        ll.1 = ll.1){
+                        ll.1 = ll.1, cp.only = FALSE){
 
   x <- c(x.1, x.2)
   ll.1 <- c(ll.1, rep(0, length(x) - length(ll.1)))
 
+  if (!cp.only) {
   if (!use_t | (use_t & is.null(start.2))) {
 
     if (is.null(start.2)) {
@@ -124,6 +125,22 @@ fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, idx, N,
     fit_sd <- abs(opt$par[3])
     fit_df <- opt$par[4]
   }
+  } else {
+    start.normt <- start.2$d
+    if (!prof | use_t) {
+      start.normt <- c(start.normt, start.2$m, start.2$sd)
+    }
+    if (use_t) {
+      start.normt <- c(start.normt, start.2$df)
+    }
+    ll <- loglik_res(start.normt, x = x,
+                     sigmoid = FALSE, ll.1 = ll.1,
+                     use_t = use_t, idx = idx)
+    fit_d <- start.2$d
+    fit_m <- start.2$m
+    fit_sd <- start.2$sd
+    fit_df <- start.2$df
+  }
   return(list(fit_M=ll,fit_d=fit_d,fit_m=fit_m, fit_sd=fit_sd, fit_df = fit_df))
 }
 
@@ -137,8 +154,7 @@ fit_res_step = function(t.1, x.1, x.2, deg, seqby, resd.seqby, idx, N,
 #' @export
 t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                      seqby = 1, resd.seqby = 5,
-                     use_scale = TRUE, use_t = FALSE, prof = TRUE,
-                     ret.ll.1 = FALSE){
+                     use_scale = TRUE, use_t = FALSE, prof = TRUE){
   # dat: input time series
   # t.max: cutoff for time considered
   # tau.range candidate change point range
@@ -147,8 +163,7 @@ t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   # use_scale: if true, scale time series
   res1 = search_dtau_step(dat, t.max, tau.range, deg,
                           seqby = seqby, resd.seqby = resd.seqby,
-                          use_scale = use_scale, use_t = use_t, prof = prof,
-                          ret.ll.1 = ret.ll.1)
+                          use_scale = use_scale, use_t = use_t, prof = prof)
   return(res1)
 }
 
@@ -160,7 +175,9 @@ t2cd_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
                             seqby = 1, resd.seqby = 5,
                             use_scale = TRUE, use_t = FALSE, prof = TRUE,
-                            ret.ll.1 = FALSE){
+                            cp.only = FALSE,
+                            fix.d = NULL, fix.m = NULL, fix.sd = NULL,
+                            fix.df = NA) {
   # select data below t.max
   if (is.na(t.max)){
     t.max = max(dat$tim, na.rm = T)
@@ -191,34 +208,51 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     x.1 = res_mean[1:idx]
     t.1 = tim[1:idx]
     n.1 = length(x.1)
-    # optimize for ARFIMA
-    x.2 = res_mean[(idx+1):N]
-
-    if (j == 1) {
-      start.2 <- NULL
-    } else {
-      start.2 <- list("d" = foreach.tau[[j-1]]$d,
-                      "m" = foreach.tau[[j-1]]$m,
-                      "sd" = foreach.tau[[j-1]]$sd,
-                      "df" = foreach.tau[[j-1]]$df)
-    }
 
     fit1 = refitWLS(t.1, x.1, deg = deg, seqby = seqby, resd.seqby = resd.seqby)
     resd1.1 = x.1 - fit1$fit.vals
     var.resd1.1 = fit1$var.resd
     ll.1 = dnorm(resd1.1, log = TRUE, sd = sqrt(var.resd1.1))
 
+    # optimize for ARFIMA
+    x.2 = res_mean[(idx+1):N]
+
+    if (!cp.only) {
+      if (j == 1) {
+        start.2 <- NULL
+      } else {
+        start.2 <- list("d" = foreach.tau[[j-1]]$d,
+                        "m" = foreach.tau[[j-1]]$m,
+                        "sd" = foreach.tau[[j-1]]$sd,
+                        "df" = foreach.tau[[j-1]]$df)
+      }
+    } else {
+      start.2 <- list("d" = fix.d, "m" = fix.m,
+                      "sd" = fix.sd, "df" = fix.df)
+    }
+
     fit_res = tryCatch(fit_res_step(t.1 = t.1,  x.1 = x.1, x.2 = x.2, deg = deg,
                                     seqby = seqby, resd.seqby = resd.seqby, idx = idx,
                                     N = N, use_t = use_t,
-                                    start.2 = start.2, prof = prof, ll.1 = ll.1),
+                                    start.2 = start.2, prof = prof, ll.1 = ll.1,
+                                    cp.only = cp.only),
                        error = function(e) {return(NA)})
     if ((!use_t & any(is.na(fit_res[1:4]))) | (use_t & any(is.na(fit_res)))) {
-      foreach.tau[[j]] <- list("M" = -Inf, "d" = NA, "m" = NA, "df" = NA, "sd" = NA)
+      foreach.tau[[j]] <- list("M" = -Inf,
+                               "d" = NA, "m" = NA, "df" = NA,
+                               "sd" = NA,
+                               "fit.vals" = rep(NA, length(fit1$fit.vals)),
+                               "var.resd" = rep(NA, length(fit1$var.resd)))
     }else{
-      foreach.tau[[j]] <- list("M" = fit_res$fit_M, "d" = fit_res$fit_d, "m" = fit_res$fit_m,
-                  "sd" = fit_res$fit_sd,  "df" = fit_res$fit_df)
+      foreach.tau[[j]] <- list("M" = fit_res$fit_M,
+                               "d" = fit_res$fit_d,
+                               "m" = fit_res$fit_m,
+                               "sd" = fit_res$fit_sd,
+                               "df" = fit_res$fit_df,
+                               "fit.vals" = fit1$fit.vals,
+                               "var.resd" = fit1$var.resd)
     }
+
   }
 
   M <- unlist(lapply(foreach.tau, function(x) {x$M}))
@@ -235,20 +269,20 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   max.m = m[max.idx]
   max.sd = sd[max.idx]
   max.df = df[max.idx]
+  fit.vals <- foreach.tau[[max.idx]]$fit.vals
+  var.resd <- foreach.tau[[max.idx]]$var.resd
 
   retlist <- list(M_df = M_df, res = res, tim = tim, tau.idx = tau.idx,
                   tau = max.tau, d = max.d, m = max.m, sd = max.sd, df = max.df,
-                  idx = tau.idx[max.idx], logL = M[max.idx])
-  if (ret.ll.1) {
-    retlist[["ll.1"]] <- ll.1
-  }
+                  idx = tau.idx[max.idx], logL = M[max.idx],
+                  fit.vals = fit.vals, var.resd = var.resd,
+                  ll.1 = ll.1)
 
   return(retlist)
 }
 # plot sequences and fitted lines
 #' @export
-plot_t2cd_step = function(results, tau.range = c(10, 50), deg = 3,
-                          use_scale = TRUE, return_plot = TRUE){
+plot_t2cd_step = function(results, tau.range = c(10, 50), return_plot = TRUE){
   res = results$res
   tim = results$tim
   tau.idx = results$tau.idx
@@ -264,18 +298,13 @@ plot_t2cd_step = function(results, tau.range = c(10, 50), deg = 3,
   opt_tau = results$tau
   opt_idx = results$idx
 
-  ### fitted values for first regime
   fit1 = refitWLS(tim[1:opt_idx], res_mean[1:opt_idx], deg = deg)
   var.resd1.1 = fit1$var.resd
-  mu = c(fit1$fit.vals, rep(NA, N-opt_idx))
 
-  # fitted values for second regime
-    m = results$m
-    x.2 = res_mean[(opt_idx+1):N]
-    diff_p = c(diffseries_keepmean(matrix(x.2-m, ncol = 1), opt_d))
+  m = results$m
+  x.2 = res_mean[(opt_idx+1):N]
 
-    mu.2 = (x.2 - m) - diff_p
-    mu[(opt_idx+1):N] = mu.2 + m
+  mu = c(fit1$fit.vals,  trend_fi(s = x.2, eff.d = opt_d,  mu = m))
 
   if (use_scale){
     fit.vals = mu*attributes(res_mean)$'scaled:scale'
@@ -325,10 +354,9 @@ bootstrap_sample_step = function(results, plot_results, seed = 0){
   # regime 2
   opt_d = results$d
   m = results$m
-  res_mean = scale(res, center = F) # scaling
-  diff_p = c(diffseries_keepmean(matrix(res_mean[(opt_idx+1):N]-m, ncol = 1), opt_d))
-  sd.resd2 = sqrt(mean(diff_p^2))
-  sim = sim.fi(N-opt_idx, opt_d, sd.resd2, mu = m)
+  sd = results$sd
+  df <- results$df
+  sim = sim_fi(N-opt_idx, opt_d, mu = m, sig = sd, df = df)
   seq_fi = sim$s
 
   samp = c(fit.vals1 + noise1, seq_fi*plot_results$scaling)
@@ -340,10 +368,13 @@ boot_k = function(k, results, plot_results, methodname){
 
   if (methodname=='step'){
     samp = bootstrap_sample_step(results, plot_results, seed = k)
-    res = t2cd_step(samp)
+    use_t <- ifelse(any(is.na(results$df)), FALSE, TRUE)
+    res = t2cd_step(samp, use_t = use_t)
   }else if (methodname=='sigmoid'){
     samp = bootstrap_sample_sigmoid(results, plot_results, seed = k)
-    res = t2cd_sigmoid(list(res=matrix(samp$res,1), tim=matrix(samp$tim,1)))
+    use_t <- ifelse(any(is.na(results$df)), FALSE, TRUE)
+    res = t2cd_sigmoid(list(res=matrix(samp$res,1), tim=matrix(samp$tim,1)),
+                       use_t = use_t)
   }
   tau_step = res$tau
   d_step = res$d
