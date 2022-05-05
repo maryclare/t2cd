@@ -1,4 +1,13 @@
 #' @export
+# Fixes a numerical issue with choose
+choose_robust <- function(n, k) {
+  if (abs(n - 1) <= 10^(-7)) {
+    choose(1, k)
+  } else {
+    choose(n, k)
+  }
+}
+#' @export
 # extracts series resistance according to selection of expt, frequency, gel, inf, nor, null, wou
 extractdata = function(dat.com, dat.info, expt, freq, gel, inf, nor, null=0, wou=0){
   # dat.com, dat.info: data
@@ -112,7 +121,7 @@ diffseries_keepmean = function(x, d){
   N  = nrow(x) # assumes x is N-by-p
   p = ncol(x)
   x[is.na(x)] = 0
-  dp_coeff = sapply(0:(N-1), function(k){return(choose(d, k)*(-1)**k)})
+  dp_coeff = sapply(0:(N-1), function(k){return(choose_robust(d, k)*(-1)**k)})
   s = matrix(nrow = 0, ncol = p)
   for (i in 1:N){
     s = rbind(s, colSums(matrix(x[i:1,]*dp_coeff[1:i], ncol = p)))
@@ -123,7 +132,7 @@ diffseries_keepmean = function(x, d){
 #' @export
 tr_fi <- function(s, eff.d, mu, dn_coeff = NULL) {
   if (is.null(dn_coeff)) {
-    dn_coeff = sapply(1:length(s), function(k){return(choose(eff.d, k)*(-1)**(k+1))})
+    dn_coeff = sapply(1:length(s), function(k){return(choose_robust(eff.d, k)*(-1)**(k+1))})
   }
   mu + sum((s - mu)*dn_coeff[1:length(s)])
 }
@@ -137,7 +146,7 @@ sim_fi = function(N, eff.d, sig=1, mu = 0, df = NA){
   } else {
     noise = sig*sqrt((df - 2)/df)*rt(N, df = df)
   }
-  dn_coeff = sapply(1:N, function(k){return(choose(eff.d, k)*(-1)**(k+1))})
+  dn_coeff = sapply(1:N, function(k){return(choose_robust(eff.d, k)*(-1)**(k+1))})
   trend = c(mu)
   s = c(trend[length(trend)] + noise[1])
   for (i in 1:(N-1)){
@@ -155,7 +164,7 @@ sim_fi = function(N, eff.d, sig=1, mu = 0, df = NA){
 trend_fi = function(s, eff.d, mu = 0){
 
   N <- length(s)
-  dn_coeff = sapply(1:N, function(k){return(choose(eff.d, k)*(-1)**(k+1))})
+  dn_coeff = sapply(1:N, function(k){return(choose_robust(eff.d, k)*(-1)**(k+1))})
   trend = c(mu)
   for (i in 1:(N-1)){
     trend = c(trend,
