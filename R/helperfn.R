@@ -1,7 +1,7 @@
 #' @export
 # Fixes a numerical issue with choose
 choose_robust <- function(n, k) {
-  if (abs(n - 1) <= 10^(-7)) {
+  if (abs(n - 1) <= 10^(-7 + 10^(-10))) {
     choose(1, k)
   } else {
     choose(n, k)
