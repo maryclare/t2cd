@@ -1,11 +1,12 @@
 #' @export
-# Fixes a numerical issue with choose
+# Fixes a numerical issue with choose, isn't relevant with newer
+# versions of R
 choose_robust <- function(n, k) {
-  if (abs(n - 1) <= 10^(-7 + 10^(-10))) {
-    choose(1, k)
-  } else {
+  # if (abs(n - 1) <= 10^(-7 + 10^(-10))) {
+  #   choose(1, k)
+  # } else {
     choose(n, k)
-  }
+  # }
 }
 #' @export
 # extracts series resistance according to selection of expt, frequency, gel, inf, nor, null, wou
