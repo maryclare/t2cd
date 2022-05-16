@@ -211,8 +211,8 @@ plot_t2cd_step_mv = function(results, tau.range = c(10, 50),
 
   for (k in 1:nrow(res)) {
     ### fitted values for first regime
-    fit1[k, 1:opt_idx[k]] = res_step$fit.vals[k, 1:opt_idx[k]]
-    var.resd1.1[k, 1:opt_idx[k]] = res_step$var.resd[k, 1:opt_idx[k]]
+    fit1[k, 1:opt_idx[k]] = results$fit.vals[k, 1:opt_idx[k]]
+    var.resd1.1[k, 1:opt_idx[k]] = results$var.resd[k, 1:opt_idx[k]]
     x.2 = res_mean[k, (opt_idx[k]+1):N]
     mu[k, ] = c(fit1[k, 1:opt_idx[k]],
                 trend_fi(s = x.2, eff.d = opt_d,  mu = m[k]))
