@@ -69,12 +69,15 @@ loglik_res = function(param, sigmoid = TRUE,
     sd <- param[k + 3]
   }
 
+  # cat("Param: ", param, "\n")
 
   logL = sum((1-wt)*ll.1) +
     ifelse(!use_t,
            loglik_res_step(par = c(dfrac, m, sd), x.2 = x, wt = wt),
            loglik_t_res_step(par = c(dfrac, m, sd, df), x.2 = x, wt = wt)) +
     ifelse(pen, C*sum(wt[length(wt)] - wt[1]), 0)
+
+  # cat("logL: ", logL, "\n")
 
   return(logL)
 }

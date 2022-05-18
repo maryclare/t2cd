@@ -4,8 +4,9 @@
 # loglikelihood, penalty to enforce tau within tau.range
 #' @export
 # loglikelihood
-loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x,
-                                 ll.1.mat, alpha0, alpha1, C = NULL, pen = FALSE, use_t = FALSE){
+loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, p, x,
+                                 ll.1.mat, alpha0, alpha1,
+                                 C = NULL, pen = FALSE, use_t = FALSE){
   dfrac = param[1]
   if (use_t) {
     m <- param[1 + 1:p]
@@ -21,8 +22,8 @@ loglik_res_sigmoid_mv = function(param, tim_cp, tau.idx, N, p, x,
     }
     logL = logL +
       loglik_res(param = parev, sigmoid = TRUE,
-                 tim_cp = tim_cp[k, ], tau.idx = tau.idx,
-                 x = x[k, ], ll.1 = ll.1.mat[k, ],
+                 tim_cp = na.omit(tim_cp[k, ]), tau.idx = na.omit(tau.idx[k, ]),
+                 x = na.omit(x[k, ]), ll.1 = na.omit(ll.1.mat[k, ]),
                  pen = pen, use_t = use_t, C = C)
   }
 
@@ -52,11 +53,14 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
     t.max = min(apply(dat$tim, 1, max, na.rm = T))
   }
 
-  tim.ind = !is.na(dat$tim) & dat$tim <= t.max
-  t.maxidx = which(apply(tim.ind, 2, all) == T)
+  max.tim.ind =
+    max(apply(dat$tim, 1, function(x) {max(which(!is.na(x) & x <= t.max))}))
 
-  res = matrix(dat$res[, t.maxidx], nrow = nrow(dat$res))
-  tim = matrix(dat$tim[, t.maxidx], nrow = nrow(dat$tim))
+  res = matrix(dat$res[, 1:max.tim.ind], nrow = nrow(dat$res))
+  tim = matrix(dat$tim[, 1:max.tim.ind], nrow = nrow(dat$tim))
+
+  res[!is.na(tim) & tim > t.max] <- NA
+  tim[!is.na(tim) & tim > t.max] <- NA
   if (use_scale){
     res_mean = t(scale(t(res), center = F)) # scaling
   }else{
@@ -67,8 +71,18 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
   x = res_mean
 
   # points in change range
-  tau.idx = which(apply(tim >= tau.range[1] & tim <= tau.range[2], 2, all))
-  tim_cp = matrix(tim[,tau.idx], nrow = nrow(tim))
+  tim_cp = tim
+  tim_cp[!is.na(tim) & (tim < tau.range[1] | tim > tau.range[2])] <- NA
+
+  min.tau.idx <- apply(tim_cp, 1, function(x) {min(which(!is.na(x)))})
+  max.tau.idx <- apply(tim_cp, 1, function(x) {max(which(!is.na(x)))})
+
+  tau.idx <- matrix(NA, nrow = nrow(tim), ncol = max(max.tau.idx - min.tau.idx) + 1)
+  for (k in 1:p) {
+    tau.idx[k, 1:(max.tau.idx[k] - min.tau.idx[k] + 1)] <- min.tau.idx[k]:max.tau.idx[k]
+  }
+
+  tim_cp = tim_cp[, !apply(tim_cp, 2, function(x) {sum(is.na(x))}) == nrow(tim_cp), drop = FALSE]
 
   # determine range of d to search and find initializing parameters
   if (!use_t) {
@@ -77,7 +91,7 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
     init.param = matrix(NA, p, 6)
   }
   init.d = rep(NA, p)
-  fit.vals <- var.resd <- ll.1.mat <- matrix(ncol = N, nrow = p)
+  fit.vals <- var.resd <- ll.1.mat <- matrix(NA, ncol = N, nrow = p)
   for (k in 1:p){
     res_k = t2cd_sigmoid(list(res=matrix(x[k,], 1), tim=matrix(tim[k,], 1)),
                          t.max, tau.range, init.tau, deg, C,
@@ -85,9 +99,9 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
                          use_scale = FALSE, use_t = use_t)
     init.param[k,] = res_k$par
     init.d[k] = res_k$d
-    ll.1.mat[k, ] <- res_k$ll.1
-    fit.vals[k, ] <- res_k$fit.vals
-    var.resd[k, ] <- res_k$var.resd
+    ll.1.mat[k, 1:length(res_k$ll.1)] <- res_k$ll.1
+    fit.vals[k, 1:length(res_k$fit.vals)] <- res_k$fit.vals
+    var.resd[k, 1:length(res_k$var.resd)] <- res_k$var.resd
   }
 
   alpha0 = init.param[,1]
@@ -108,13 +122,13 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
   optim_params = optim(par = start,
                        fn = loglik_res_sigmoid_mv, method = "L-BFGS-B",
                        lower = lower, upper = upper,
-                       tim_cp = tim_cp, tau.idx = tau.idx, N = N, p = p, x = x,
+                       tim_cp = tim_cp, tau.idx = tau.idx, p = p, x = x,
                        ll.1.mat = ll.1.mat, C = C,
                        alpha0 = alpha0, alpha1 = alpha1, pen = TRUE,
                        control = list("fnscale" = -1), use_t = use_t)
   opt_param = c(alpha0, alpha1, optim_params$par)
   opt_logL = loglik_res_sigmoid_mv(optim_params$par,
-                                   tim_cp = tim_cp, tau.idx = tau.idx, N = N,
+                                   tim_cp = tim_cp, tau.idx = tau.idx,
                                    p = p, x = x,
                                    ll.1.mat = ll.1.mat, alpha0 = alpha0,
                                    alpha1 = alpha1, use_t = use_t)
@@ -124,18 +138,22 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
     opt_logL = res_k$logL
   }
   # weights
-  wt <- matrix(nrow = p, ncol = N)
+  wt <- matrix(NA, nrow = p, ncol = N)
   for (k in 1:p) {
-    wt[k, ] <- get.wt(alpha = c(alpha0[k], alpha1[k]), tim_cp = tim_cp[k, ],
-                      tau.idx = tau.idx, N = N)
+    wt[k, 1:length(na.omit(x[k, ]))] <-
+      get.wt(alpha = c(alpha0[k], alpha1[k]),
+             tim_cp = na.omit(tim_cp[k, ]),
+             tau.idx = na.omit(tau.idx[k, ]),
+             N = length(na.omit(x[k, ])))
   }
 
   df <- sd <- m <- rep(NA, nrow(x))
 
   for (k in 1:length(m)) {
     if (!use_t) {
-      m[k] <- get.m(x.2 = x[k, ], dfrac = opt_d, wt = wt[k, ])
-      sd[k] <- get.sd(x.2 = x[k, ], dfrac = opt_d, mean = m[k], wt = wt[, ])
+      m[k] <- get.m(x.2 = na.omit(x[k, ]), dfrac = opt_d, wt = na.omit(wt[k, ]))
+      sd[k] <- get.sd(x.2 = na.omit(x[k, ]), dfrac = opt_d, mean = m[k],
+                      wt = na.omit(wt[k, ]))
     } else {
       m[k] <- opt_param[3 + k]
       sd[k] <- abs(opt_param[3 + p + k])
@@ -150,7 +168,9 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
     opt_tau = c(opt_tau, tim[k,opt_tau.idx[k]])
   }
 
-  return(list(res = res, res_mean = res_mean, tim = tim, tau.idx = tau.idx,
+  return(list(res = res, res_mean = res_mean, tim = tim,
+              tim_cp = tim_cp,
+              tau.idx = tau.idx,
               idx = opt_tau.idx,
               d = opt_d, univ_d = univ_d, tau = opt_tau, param = opt_param,
               logL = opt_logL,
@@ -164,6 +184,7 @@ plot_t2cd_sigmoid_mv = function(results, tau.range = c(10, 50),
                                 return_plot = TRUE, use_scale = TRUE){
   res = results$res
   tim = results$tim
+  tim_cp = results$tim_cp
   tau.idx = results$tau.idx
   res_mean = results$res_mean # scaling
   N = ncol(res_mean)
@@ -171,9 +192,6 @@ plot_t2cd_sigmoid_mv = function(results, tau.range = c(10, 50),
 
   fit1 <- results$fit.vals
   var.resd1 <- results$var.resd
-
-  # points in change range
-  tim_cp = matrix(tim[,tau.idx], nrow = nrow(tim))
 
   # select optimal parameters
   opt_d = results$d
@@ -188,16 +206,21 @@ plot_t2cd_sigmoid_mv = function(results, tau.range = c(10, 50),
   # weights
   wt <- matrix(nrow = p, ncol = N)
   for (k in 1:p) {
-    wt[k, ] <- get.wt(alpha = c(alpha0[k], alpha1[k]), tim_cp = tim_cp[k, ],
-                      tau.idx = tau.idx, N = N)
+    N.k <- length(na.omit(res[k, ]))
+    wt[k, 1:N.k] <-
+      get.wt(alpha = c(alpha0[k], alpha1[k]),
+             tim_cp = na.omit(tim_cp[k, ]),
+             tau.idx = na.omit(tau.idx[k, ]),
+             N = N.k)
   }
 
   # update variables if using original or first difference
   fit.vals <- mu.2 <- diff_p <- matrix(nrow = nrow(res), ncol = ncol(res))
   for (k in 1:p) {
+    N.k <- length(na.omit(res[k, ]))
     x.2 = res_mean[k, ]
     d = opt_d
-    diff_p[k, ] = t(diffseries_keepmean(t(wt[k, ]*(x.2-m[k])), d))
+    diff_p[k, 1:N.k] = t(diffseries_keepmean(t(na.omit(wt[k, ]*(x.2-m[k]))), d))
 
     mu.2[k, ] = wt[k, ]*(x.2-m[k]) - diff_p[k, ]
     fit.vals[k, ] = (mu.2[k, ] + wt[k, ]*m[k]) +(1-wt[k, ])*fit1[k, ]

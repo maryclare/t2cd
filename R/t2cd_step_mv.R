@@ -18,8 +18,9 @@ loglik_res_step_mv = function(param, x, idx, ll.1,
     } else {
       par <- c(dfrac, mean[k], sd[k], df[k])
     }
-    ll <- loglik_res(par = par, x = x[k, ],
-                     sigmoid = FALSE, ll.1 = ll.1[k, ],
+    N.k <- max(which(!is.na(ll.1[k, ])))
+    ll <- loglik_res(par = par, x = x[k, 1:N.k],
+                     sigmoid = FALSE, ll.1 = ll.1[k, 1:N.k],
                      use_t = use_t, idx = idx[k])
 
     logL <- logL + ll
@@ -56,10 +57,14 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     t.max = min(apply(dat$tim, 1, max, na.rm = T))
   }
 
-  tim.ind = !is.na(dat$tim) & dat$tim <= t.max
-  t.maxidx = which(apply(tim.ind, 2, all) == T)
+  max.tim.ind =
+    max(apply(dat$tim, 1, function(x) {max(which(!is.na(x) & x <= t.max))}))
 
-  res = matrix(dat$res[, t.maxidx], nrow = nrow(dat$res))
+  res = matrix(dat$res[, 1:max.tim.ind], nrow = nrow(dat$res))
+  tim = matrix(dat$tim[, 1:max.tim.ind], nrow = nrow(dat$tim))
+
+  res[!is.na(tim) & tim > t.max] <- NA
+  tim[!is.na(tim) & tim > t.max] <- NA
   if (use_scale){
     res_mean = t(scale(t(res), center = F)) # scaling
   }else{
@@ -69,12 +74,8 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
       res_mean = res
     }
   }
-  tim = matrix(dat$tim[, t.maxidx], nrow = nrow(dat$tim))
   N = ncol(res_mean)
   p = nrow(res_mean)
-
-  # points in change range
-  tau.idx = which(apply(tim >= tau.range[1] & tim <= tau.range[2], 2, all))
 
   # alternate between optimizing for tau and FI parameters
   iter_k = 1
@@ -88,7 +89,7 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   while (iter_flag){
     # retain all data in regime 2
     reg2 = matrix(NA, nrow = p, ncol = N)
-    fit.vals <- var.resd <- ll.1 <- matrix(0, nrow = p, ncol = N)
+    fit.vals <- var.resd <- ll.1 <- matrix(NA, nrow = p, ncol = N)
     for (k in 1:p){
       cat("k=", k, "\n")
       if (iter_k==1){
@@ -102,7 +103,8 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
         init.df[k] = res_k$df
         init.tau[k] = res_k$tau
         init.idx[k] = res_k$idx
-        ll.1[k, 1:length(res_k$ll.1)] <- res_k$ll.1
+        ll.1[k, 1:length(na.omit(res_mean[k,]))] <-
+          c(res_k$ll.1, rep(0, length(na.omit(res_mean[k,])) - length(res_k$ll.1)))
         fit.vals[k, 1:length(res_k$fit.vals)] <- res_k$fit.vals
         var.resd[k, 1:length(res_k$var.resd)] <- res_k$var.resd
       }else{
@@ -119,7 +121,8 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
         fix.df[k] = res_k$df
         tau[k] = res_k$tau
         idx[k] = res_k$idx
-        ll.1[k, 1:length(res_k$ll.1)] <- res_k$ll.1
+        ll.1[k, 1:length(na.omit(res_mean[k,]))] <-
+          c(res_k$ll.1, rep(0, length(na.omit(res_mean[k,])) - length(res_k$ll.1)))
         fit.vals[k, 1:length(res_k$fit.vals)] <- res_k$fit.vals
         var.resd[k, 1:length(res_k$var.resd)] <- res_k$var.resd
       }
@@ -146,8 +149,8 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
     d_current = optim_params$par
     df_current <- sd_current <- m_current <- rep(NA, nrow(res))
     for (l in 1:length(m_current)) {
-      m_current[l] <-  get.m(x.2 = x[l, (idx[l] + 1):N], dfrac = d_current)
-      sd_current[l] <-  get.sd(x.2 = x[l, (idx[l] + 1):N], dfrac = d_current,
+      m_current[l] <-  get.m(x.2 = na.omit(x[l, (idx[l] + 1):N]), dfrac = d_current)
+      sd_current[l] <-  get.sd(x.2 = na.omit(x[l, (idx[l] + 1):N]), dfrac = d_current,
                                mean = m_current[l])
     }
     neglogL_current = -optim_params$value
@@ -181,7 +184,7 @@ t2cd_step_mv = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
 
   }
 
-  return(list(res = res, res_mean = res_mean, tim = tim, tau.idx = tau.idx,
+  return(list(res = res, res_mean = res_mean, tim = tim,
               tau = tau, idx = idx, d = d_current,
               m = m_current, sd = sd_current, df = df_current,
               univ_tau = init.tau, univ_idx = init.idx, univ_d = init.d,
@@ -213,8 +216,9 @@ plot_t2cd_step_mv = function(results, tau.range = c(10, 50),
     ### fitted values for first regime
     fit1[k, 1:opt_idx[k]] = results$fit.vals[k, 1:opt_idx[k]]
     var.resd1.1[k, 1:opt_idx[k]] = results$var.resd[k, 1:opt_idx[k]]
-    x.2 = res_mean[k, (opt_idx[k]+1):N]
-    mu[k, ] = c(fit1[k, 1:opt_idx[k]],
+    N.k <- length(na.omit(res_mean[k, ]))
+    x.2 = res_mean[k, (opt_idx[k]+1):N.k]
+    mu[k, 1:N.k] = c(fit1[k, 1:opt_idx[k]],
                 trend_fi(s = x.2, eff.d = opt_d,  mu = m[k]))
 
     # Back on original scale

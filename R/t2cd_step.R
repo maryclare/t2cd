@@ -201,7 +201,7 @@ search_dtau_step = function(dat, t.max = 72, tau.range = c(10, 50), deg = 3,
   # iterate through each tau, return log-likelihood
   foreach.tau <- vector("list", length = length(tau.idx))
   for (j in 1:length(tau.idx)) {
-    cat("j=", j, "\n")
+    # cat("j=", j, "\n")
     idx = tau.idx[j]
 
     # optimize for polynomial component
