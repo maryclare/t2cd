@@ -155,9 +155,9 @@ t2cd_sigmoid_mv = function(dat, t.max = 72, tau.range = c(10, 50),
       sd[k] <- get.sd(x.2 = na.omit(x[k, ]), dfrac = opt_d, mean = m[k],
                       wt = na.omit(wt[k, ]))
     } else {
-      m[k] <- optim_params$par[1 + k]
-      sd[k] <- abs(optim_params$par[1 + p + k])
-      df[k] <- optim_params$par[1 + 2*p + k]
+      m[k] <- opt_param[2*p + 1 + k]
+      sd[k] <- abs(opt_param[2*p + 1 + p + k])
+      df[k] <- opt_param[2*p + 1 + 2*p + k]
     }
   }
 
